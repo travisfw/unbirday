@@ -1,19 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
 
     <string-array name="themes">
         <item>@string/system_theme</item>
         <item>@string/dark_theme</item>
         <item>@string/light_theme</item>
+        <item>@string/black_theme</item>
     </string-array>
 
     <string-array name="themeValues">
         <item>system</item>
         <item>dark</item>
         <item>light</item>
+        <item>black</item>
     </string-array>
 
-    <string-array name="accents">
+    <string-array name="accents" tools:ignore="InconsistentArrays">
+        <item>@string/aqua</item>
         <item>@string/brown</item>
         <item>@string/blue</item>
         <item>@string/green</item>
@@ -28,7 +31,8 @@
         <item>@string/crimson</item>
     </string-array>
 
-    <string-array name="accentValues">
+    <string-array name="accentValues" tools:ignore="InconsistentArrays">
+        <item>aqua</item>
         <item>brown</item>
         <item>blue</item>
         <item>green</item>
@@ -43,32 +47,7 @@
         <item>crimson</item>
     </string-array>
 
-    <string-array name="notificationHours">
-        <item>0:00 – 0:10</item>
-        <item>1:00 – 1:10</item>
-        <item>6:00 – 6:10</item>
-        <item>7:00 – 7:10</item>
-        <item>8:00 – 8:10</item>
-        <item>9:00 – 9:10</item>
-        <item>10:00 – 10:10</item>
-        <item>11:00 – 11:10</item>
-        <item>12:00 – 12:10</item>
-    </string-array>
-
-    <string-array name="notificationHourValues">
-        <item>0</item>
-        <item>1</item>
-        <item>6</item>
-        <item>7</item>
-        <item>8</item>
-        <item>9</item>
-        <item>10</item>
-        <item>11</item>
-        <item>12</item>
-    </string-array>
-
     <string-array name="additionalNotification">
-        <item>@string/no_additional_notification</item>
         <item>@string/one_day_before</item>
         <item>@string/two_days_before</item>
         <item>@string/three_days_before</item>
@@ -76,10 +55,12 @@
         <item>@string/five_days_before</item>
         <item>@string/six_days_before</item>
         <item>@string/seven_days_before</item>
+        <item>@string/ten_days_before</item>
+        <item>@string/fourteen_days_before</item>
+        <item>@string/twentyone_days_before</item>
     </string-array>
 
     <string-array name="additionalNotificationValues">
-        <item>0</item>
         <item>1</item>
         <item>2</item>
         <item>3</item>
@@ -87,5 +68,11 @@
         <item>5</item>
         <item>6</item>
         <item>7</item>
+        <item>10</item>
+        <item>14</item>
+        <item>21</item>
+    </string-array>
+
+    <string-array name="additionalNotificationDefaultValues">
     </string-array>
 </resources>

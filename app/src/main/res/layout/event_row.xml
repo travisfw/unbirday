@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:background="?attr/selectableItemBackground"
     android:hapticFeedbackEnabled="false"
-    android:orientation="vertical"
     android:paddingHorizontal="@dimen/recycler_padding"
     android:paddingVertical="@dimen/between_row_padding">
 
@@ -13,39 +13,60 @@
         android:id="@+id/eventImage"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:background="?attr/selectableItemBackgroundBorderless"
-        android:clickable="true"
         android:contentDescription="@string/event_details"
-        android:focusable="true"
         android:padding="@dimen/in_row_padding"
-        android:src="@drawable/placeholder_event_image"
+        android:src="@drawable/placeholder_birthday_image"
         app:layout_constraintBottom_toBottomOf="@id/eventDate"
-        app:layout_constraintDimensionRatio="1:1"
+        app:layout_constraintDimensionRatio="1.0"
+        app:layout_constraintHeight_max="@dimen/in_row_image"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="@id/eventPerson"
+        app:layout_constraintWidth_max="@dimen/in_row_image"
         app:shapeAppearanceOverlay="@style/roundedImageView"
-        app:strokeColor="?colorAccent"
+        app:strokeColor="?attr/colorOutline"
         app:strokeWidth="@dimen/card_stroke" />
 
-    <TextView
+    <com.google.android.material.textview.MaterialTextView
         android:id="@+id/eventPerson"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:paddingHorizontal="@dimen/in_row_button_padding"
-        android:textAppearance="@style/TextAppearance.MaterialComponents.Subtitle1"
+        android:paddingHorizontal="@dimen/in_row_padding"
+        android:paddingVertical="@dimen/in_row_padding"
+        android:text="@string/insert_name_hint"
+        android:textAppearance="@style/TextAppearance.Material3.BodyLarge"
         app:layout_constraintEnd_toStartOf="@id/favoriteButton"
-        app:layout_constraintStart_toEndOf="@id/eventImage"
+        app:layout_constraintStart_toStartOf="@id/eventTypeImage"
         app:layout_constraintTop_toTopOf="parent" />
 
-    <TextView
+    <!-- The "H" in the ratio means that the width is computed after the height and is based on it-->
+    <ImageView
+        android:id="@+id/eventTypeImage"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:background="@drawable/ic_dot_black_24dp"
+        android:backgroundTint="?attr/colorSurfaceVariant"
+        android:contentDescription="@string/event_type_hint"
+        android:maxWidth="@dimen/preview_dot_size"
+        android:maxHeight="@dimen/preview_dot_size"
+        android:padding="@dimen/event_type_badge_padding"
+        android:src="@drawable/ic_anniversary_24dp"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="@id/eventDate"
+        app:layout_constraintDimensionRatio="H,1"
+        app:layout_constraintStart_toEndOf="@id/eventImage"
+        app:layout_constraintTop_toTopOf="@id/eventDate"
+        tools:visibility="visible" />
+
+    <com.google.android.material.textview.MaterialTextView
         android:id="@+id/eventDate"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_marginVertical="@dimen/in_row_padding"
         android:paddingHorizontal="@dimen/in_row_button_padding"
-        android:textAppearance="@style/TextAppearance.MaterialComponents.Subtitle2"
+        android:paddingVertical="@dimen/in_row_padding"
+        android:text="@string/birth_date"
+        android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
         app:layout_constraintEnd_toStartOf="@id/favoriteButton"
-        app:layout_constraintStart_toStartOf="@id/eventPerson"
+        app:layout_constraintStart_toEndOf="@id/eventTypeImage"
         app:layout_constraintTop_toBottomOf="@id/eventPerson" />
 
     <ImageView
@@ -57,8 +78,9 @@
         android:clickable="true"
         android:contentDescription="@string/add_favorite"
         android:focusable="true"
+        android:hapticFeedbackEnabled="false"
         android:paddingVertical="@dimen/in_row_button_padding"
-        android:src="@drawable/animated_to_favorite"
+        android:src="@drawable/animated_favorite_normal_to_favorite"
         app:layout_constraintBottom_toBottomOf="@id/eventDate"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintTop_toTopOf="@id/eventPerson" />

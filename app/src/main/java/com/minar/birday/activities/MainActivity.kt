@@ -1,84 +1,145 @@
 package com.minar.birday.activities
 
 import android.Manifest
+import android.app.ActivityManager
+import android.app.AlertDialog
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.appwidget.AppWidgetManager
+import android.content.ComponentName
 import android.content.ContentResolver
-import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.database.Cursor
 import android.graphics.Color
 import android.media.AudioAttributes
 import android.media.AudioAttributes.Builder
 import android.net.Uri
-import android.os.*
-import android.text.Editable
-import android.text.TextWatcher
-import android.widget.TextView
-import android.widget.Toast
+import android.os.Build
+import android.os.Bundle
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
+import android.provider.OpenableColumns
+import android.provider.Settings
+import android.view.View
+import android.view.animation.Interpolator
+import android.widget.ImageView
+import androidx.activity.OnBackPressedCallback
+import androidx.activity.SystemBarStyle
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
+import androidx.annotation.IdRes
+import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.coordinatorlayout.widget.CoordinatorLayout
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.ViewModelProvider
+import androidx.core.content.edit
+import androidx.core.graphics.drawable.toBitmap
+import androidx.core.net.toUri
+import androidx.core.view.ViewCompat
+import androidx.core.view.animation.PathInterpolatorCompat
+import androidx.core.view.isGone
+import androidx.core.view.updatePadding
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.NavController
-import androidx.navigation.Navigation
-import androidx.navigation.ui.setupWithNavController
+import androidx.navigation.NavOptions
+import androidx.navigation.fragment.NavHostFragment
 import androidx.preference.PreferenceManager
-import com.afollestad.materialdialogs.LayoutMode
-import com.afollestad.materialdialogs.MaterialDialog
-import com.afollestad.materialdialogs.WhichButton
-import com.afollestad.materialdialogs.actions.getActionButton
-import com.afollestad.materialdialogs.bottomsheets.BottomSheet
-import com.afollestad.materialdialogs.customview.customView
-import com.afollestad.materialdialogs.customview.getCustomView
-import com.afollestad.materialdialogs.datetime.datePicker
-import com.google.android.material.bottomnavigation.BottomNavigationView
-import com.google.android.material.floatingactionbutton.FloatingActionButton
-import com.google.android.material.switchmaterial.SwitchMaterial
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.snackbar.Snackbar
 import com.minar.birday.R
-import com.minar.birday.adapters.EventAdapter
-import com.minar.birday.backup.BirdayImporter
-import com.minar.birday.backup.ContactsImporter
+import com.minar.birday.databinding.ActivityMainBinding
+import com.minar.birday.fragments.dialogs.ImportContactsBottomSheet
+import com.minar.birday.fragments.dialogs.InsertEventBottomSheet
 import com.minar.birday.model.Event
+import com.minar.birday.model.EventResult
+import com.minar.birday.preferences.backup.BirdayExporter
+import com.minar.birday.preferences.backup.BirdayImporter
+import com.minar.birday.preferences.backup.CalendarExporter
+import com.minar.birday.preferences.backup.CalendarImporter
+import com.minar.birday.preferences.backup.ContactsImporter
+import com.minar.birday.preferences.backup.CsvExporter
+import com.minar.birday.preferences.backup.CsvImporter
+import com.minar.birday.preferences.backup.JsonExporter
+import com.minar.birday.preferences.backup.JsonImporter
 import com.minar.birday.utilities.AppRater
-import com.minar.birday.utilities.checkString
-import com.minar.birday.utilities.smartCapitalize
+import com.minar.birday.utilities.addInsetsByMargin
+import com.minar.birday.utilities.addInsetsByPadding
+import com.minar.birday.utilities.applyLoopingAnimatedVectorDrawable
+import com.minar.birday.utilities.eventToResult
+import com.minar.birday.utilities.formatTextPreview
+import com.minar.birday.utilities.getThemeColor
+import com.minar.birday.utilities.resultToEvent
+import com.minar.birday.utilities.shareUri
+import com.minar.birday.utilities.showIfNotAdded
 import com.minar.birday.viewmodels.MainViewModel
-import kotlinx.android.synthetic.main.dialog_insert_event.view.*
+import com.minar.birday.widgets.EventWidgetProvider
+import com.minar.birday.widgets.MinimalWidgetProvider
+import com.minar.birday.workers.ImportContactsWorker
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.IOException
-import java.time.LocalDate
-import java.time.format.DateTimeFormatter
-import java.time.format.FormatStyle
-import java.util.*
+import java.time.LocalDateTime
+import java.time.ZoneOffset
+import java.util.concurrent.TimeUnit
+import kotlin.concurrent.thread
 
 class MainActivity : AppCompatActivity() {
-    lateinit var mainViewModel: MainViewModel
-    private lateinit var adapter: EventAdapter
+    val mainViewModel: MainViewModel by viewModels()
     private lateinit var sharedPrefs: SharedPreferences
+    internal lateinit var binding: ActivityMainBinding
 
-    @ExperimentalStdlibApi
+    companion object {
+        val GestureInterpolator: Interpolator = PathInterpolatorCompat.create(0f, 0f, 0f, 1f)
+    }
+
+    private val navController: NavController
+        get() {
+            val navHostFragment = supportFragmentManager
+                .findFragmentById(R.id.navHostFragment) as NavHostFragment
+            return navHostFragment.navController
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
-        mainViewModel = ViewModelProvider(this).get(MainViewModel::class.java)
-        sharedPrefs = PreferenceManager.getDefaultSharedPreferences(this)
-        adapter = EventAdapter(null)
+        super.onCreate(savedInstanceState)
 
-        // Create the notification channel and check the permission (note: appIntro 6.0 is still buggy, better avoid to use it for asking permissions)
-        askContactsPermission()
+        sharedPrefs = PreferenceManager.getDefaultSharedPreferences(this)
+
+        // Create the notification channel and check the permission on Tiramisu
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            // Contacts permission is asked after the response to this permission on tiramisu
+            if (askNotificationPermission())
+            // Ask for contacts permission, if the first permission is already granted
+                askContactsPermission()
+        } else {
+            askContactsPermission()
+        }
         createNotificationChannel()
 
         // Retrieve the shared preferences
-        val sharedPrefs = PreferenceManager.getDefaultSharedPreferences(this)
         val theme = sharedPrefs.getString("theme_color", "system")
-        val accent = sharedPrefs.getString("accent_color", "brown")
+        val accent = sharedPrefs.getString("accent_color", "system")
 
         // Show the introduction for the first launch
         if (sharedPrefs.getBoolean("first", true)) {
-            val editor = sharedPrefs.edit()
-            editor.putBoolean("first", false)
-            editor.apply()
+            sharedPrefs.edit {
+                putBoolean("first", false)
+                // Set default accent based on the Android version
+                when (Build.VERSION.SDK_INT) {
+                    in 23..29 -> putString("accent_color", "blue")
+                    31 -> putString("accent_color", "system")
+                    else -> putString("accent_color", "monet")
+                }
+            }
             val intent = Intent(this, WelcomeActivity::class.java)
             startActivity(intent)
             finish()
@@ -86,234 +147,841 @@ class MainActivity : AppCompatActivity() {
 
         // Set the base theme and the accent
         when (theme) {
-            "dark" -> AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES)
-            "light" -> AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO)
             "system" -> AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM)
+            "dark", "black" -> AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES)
+            "light" -> AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO)
         }
 
-        when (accent) {
-            "blue" -> setTheme(R.style.AppTheme_Blue)
-            "green" -> setTheme(R.style.AppTheme_Green)
-            "orange" -> setTheme(R.style.AppTheme_Orange)
-            "yellow" -> setTheme(R.style.AppTheme_Yellow)
-            "teal" -> setTheme(R.style.AppTheme_Teal)
-            "violet" -> setTheme(R.style.AppTheme_Violet)
-            "pink" -> setTheme(R.style.AppTheme_Pink)
-            "lightBlue" -> setTheme(R.style.AppTheme_LightBlue)
-            "red" -> setTheme(R.style.AppTheme_Red)
-            "lime" -> setTheme(R.style.AppTheme_Lime)
-            "crimson" -> setTheme(R.style.AppTheme_Crimson)
-        }
+        // Set an amoled theme or a normal theme depending on amoled mode
+        if (theme == "black") {
+            setTheme(R.style.AppTheme)
+            when (accent) {
+                "monet" -> setTheme(R.style.AppTheme_Monet_PerfectDark)
+                "system" -> setTheme(R.style.AppTheme_System_PerfectDark)
+                "brown" -> setTheme(R.style.AppTheme_Brown_PerfectDark)
+                "blue" -> setTheme(R.style.AppTheme_Blue_PerfectDark)
+                "green" -> setTheme(R.style.AppTheme_Green_PerfectDark)
+                "orange" -> setTheme(R.style.AppTheme_Orange_PerfectDark)
+                "yellow" -> setTheme(R.style.AppTheme_Yellow_PerfectDark)
+                "teal" -> setTheme(R.style.AppTheme_Teal_PerfectDark)
+                "violet" -> setTheme(R.style.AppTheme_Violet_PerfectDark)
+                "pink" -> setTheme(R.style.AppTheme_Pink_PerfectDark)
+                "lightBlue" -> setTheme(R.style.AppTheme_LightBlue_PerfectDark)
+                "red" -> setTheme(R.style.AppTheme_Red_PerfectDark)
+                "lime" -> setTheme(R.style.AppTheme_Lime_PerfectDark)
+                "crimson" -> setTheme(R.style.AppTheme_Crimson_PerfectDark)
+                else -> setTheme(R.style.AppTheme_PerfectDark)
+            }
+        } else
+            when (accent) {
+                "monet" -> setTheme(R.style.AppTheme_Monet)
+                "system" -> setTheme(R.style.AppTheme_System)
+                "brown" -> setTheme(R.style.AppTheme_Brown)
+                "blue" -> setTheme(R.style.AppTheme_Blue)
+                "green" -> setTheme(R.style.AppTheme_Green)
+                "orange" -> setTheme(R.style.AppTheme_Orange)
+                "yellow" -> setTheme(R.style.AppTheme_Yellow)
+                "teal" -> setTheme(R.style.AppTheme_Teal)
+                "violet" -> setTheme(R.style.AppTheme_Violet)
+                "pink" -> setTheme(R.style.AppTheme_Pink)
+                "lightBlue" -> setTheme(R.style.AppTheme_LightBlue)
+                "red" -> setTheme(R.style.AppTheme_Red)
+                "lime" -> setTheme(R.style.AppTheme_Lime)
+                "crimson" -> setTheme(R.style.AppTheme_Crimson)
+                else -> setTheme(R.style.AppTheme) // Default (aqua)
+            }
 
-        super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
+        // Set the task appearance in recent apps
+        @Suppress("DEPRECATION")
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            setTaskDescription(
+                ActivityManager.TaskDescription(
+                    getString(R.string.app_name),
+                    R.mipmap.ic_launcher,
+                    ContextCompat.getColor(this, R.color.deepGray)
+                )
+            )
+        } else setTaskDescription(
+            ActivityManager.TaskDescription(
+                getString(R.string.app_name),
+                ContextCompat.getDrawable(this, R.mipmap.ic_launcher)?.toBitmap(),
+                ContextCompat.getColor(this, R.color.deepGray)
+            )
+        )
+
+        // Initialize the binding
+        binding = ActivityMainBinding.inflate(layoutInflater)
+        val view = binding.root
+        setContentView(view)
 
         // Get the bottom navigation bar and configure it for the navigation plugin
-        val navigation = findViewById<BottomNavigationView>(R.id.navigation)
-        val navController: NavController = Navigation.findNavController(this,
-            R.id.navHostFragment
-        )
-        navigation.setupWithNavController(navController)
-        navigation.setOnNavigationItemReselectedListener {
-            // Just ignore the reselection of the same item
+        val navigation = binding.navigation
+
+        // Prepare the back home callback
+        val backHomeCallback = object : OnBackPressedCallback(enabled = false) {
+            override fun handleOnBackPressed() {
+                binding.navigation.selectedItemId = R.id.navigationMain
+                navController.navigateWithOptions(R.id.navigationMain)
+            }
+        }
+
+        // Activate or disable the callback to return to the home fragment before exiting the app
+        navigation.setOnItemSelectedListener { item ->
+            when (item.itemId) {
+                R.id.navigationMain -> {
+                    backHomeCallback.isEnabled = false
+                    navController.navigateWithOptions(R.id.navigationMain)
+                }
+
+                R.id.navigationFavorites -> {
+                    backHomeCallback.isEnabled = true
+                    navController.navigateWithOptions(R.id.navigationFavorites)
+                }
+
+                R.id.navigationSettings -> {
+                    backHomeCallback.isEnabled = true
+                    navController.navigateWithOptions(R.id.navigationSettings)
+                }
+            }
+            true
+        }
+        navigation.setOnItemReselectedListener {
+            // Only do something if there's something in the back stack (only in event details)
+            if (navController.currentBackStackEntry != null &&
+                (navController.currentDestination?.label == "fragment_details" ||
+                        navController.currentDestination?.label == "fragment_overview" ||
+                        navController.currentDestination?.label == "fragment_experimental_settings")
+            )
+                navController.popBackStack()
         }
 
         // Rating stuff
         AppRater.appLaunched(this)
 
         // Manage the fab
-        val fab = findViewById<FloatingActionButton>(R.id.fab)
-        fab.setOnClickListener {
+        val addFab = binding.fab
+        val deleteFab = binding.fabDelete
+
+        // Open the bottom sheet to insert a new event
+        addFab.setOnClickListener {
             vibrate()
-            // Show a bottom sheet containing the form to insert a new event
-            var nameValue  = "error"
-            var surnameValue = ""
-            var eventDateValue: LocalDate = LocalDate.of(1970,1,1)
-            var countYearValue = true
-            val dialog = MaterialDialog(this, BottomSheet(LayoutMode.WRAP_CONTENT)).show {
-                cornerRadius(res = R.dimen.rounded_corners)
-                title(R.string.new_event)
-                icon(R.drawable.ic_party_24dp)
-                message(R.string.new_event_description)
-                // Don't use scrollable here, instead use a nestedScrollView in the layout
-                customView(R.layout.dialog_insert_event)
-                positiveButton(R.string.insert_event) {
-                    // Use the data to create a event object and insert it in the db
-                    val tuple = Event(
-                        id = 0, originalDate = eventDateValue, name = nameValue.smartCapitalize(),
-                        surname = surnameValue.smartCapitalize(), yearMatter = countYearValue
+            val bottomSheet = InsertEventBottomSheet(this)
+            if (bottomSheet.isAdded) return@setOnClickListener
+            bottomSheet.show(supportFragmentManager, "insert_event_bottom_sheet")
+        }
+        // Show a quick description of the action
+        addFab.setOnLongClickListener {
+            vibrate()
+            showSnackbar(getString(R.string.new_event_description))
+            true
+        }
+
+        // Animate the fab icon
+        animateAvd(addFab, R.drawable.animated_add_event, 5000L)
+
+        // Set the delete search action (initially hidden)
+        deleteFab.setOnClickListener {
+            vibrate()
+            val searchedEvents = mainViewModel.allEvents.value
+            if (!searchedEvents.isNullOrEmpty()) {
+                // Native dialog
+                MaterialAlertDialogBuilder(this)
+                    .setTitle(getString(R.string.delete_db_dialog_title))
+                    .setMessage(getString(R.string.delete_search_confirm))
+                    .setIcon(R.drawable.ic_delete_24dp)
+                    .setPositiveButton(resources.getString(android.R.string.ok)) { dialog, _ ->
+                        dialog.dismiss()
+                        mainViewModel.deleteAll(searchedEvents.map { resultToEvent(it) })
+                        showSnackbar(
+                            getString(R.string.deleted),
+                            actionText = getString(R.string.cancel),
+                            action = fun() {
+                                mainViewModel.insertAll(searchedEvents.map { resultToEvent(it) })
+                            })
+                    }
+                    .setNegativeButton(resources.getString(android.R.string.cancel)) { dialog, _ ->
+                        dialog.dismiss()
+                    }
+                    .show()
+            }
+        }
+        // Show a quick description of the action
+        deleteFab.setOnLongClickListener {
+            vibrate()
+            showSnackbar(getString(R.string.delete_search_title))
+            true
+        }
+
+        // Enable edge to edge, but specify the navigation bar color for android < Q
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q)
+        // The colorOutlineVariant color is used to store the deep gray and fix the navbar color on older devices
+            enableEdgeToEdge(
+                navigationBarStyle = SystemBarStyle.dark(
+                    getThemeColor(
+                        R.attr.colorOutlineVariant,
+                        this
                     )
-                    // Insert using another thread
-                    val thread = Thread { mainViewModel.insert(tuple) }
-                    thread.start()
-                    dismiss()
-                }
+                )
+            )
+        else {
+            enableEdgeToEdge()
+            window.isNavigationBarContrastEnforced = false
+        }
+        binding.navHostFragment.addInsetsByMargin(top = true, right = true, left = true)
+        binding.bottomBar.addInsetsByPadding(bottom = true, left = true, right = true)
+        binding.fab.addInsetsByMargin(bottom = true, halveInsets = true)
+        binding.fabDelete.addInsetsByMargin(bottom = true, halveInsets = true)
 
-                negativeButton(R.string.cancel) {
-                    dismiss()
-                }
-            }
+        ViewCompat.setOnApplyWindowInsetsListener(binding.navigation, null)
 
-            // Setup listeners and checks on the fields
-            dialog.getActionButton(WhichButton.POSITIVE).isEnabled = false
-            val customView = dialog.getCustomView()
-            val name = customView.findViewById<TextView>(R.id.nameEvent)
-            val surname = customView.findViewById<TextView>(R.id.surnameEvent)
-            val eventDate = customView.findViewById<TextView>(R.id.dateEvent)
-            val countYear = customView.findViewById<SwitchMaterial>(R.id.countYearSwitch)
-            val endDate = Calendar.getInstance()
-            val formatter: DateTimeFormatter = DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
-            var dateDialog: MaterialDialog? = null
+        // Hide on scroll, requires restart TODO Experimental settings
+        if (sharedPrefs.getBoolean("hide_scroll", false)) {
+            binding.bottomBar.hideOnScroll = true
+            binding.navHostFragment.updatePadding(bottom = 0)
+        }
 
-            // To automatically show the last selected date, parse it to another Calendar object
-            val lastDate = Calendar.getInstance()
+        // Auto import on launch
+        val autoImportEnabled = sharedPrefs.getBoolean("auto_import", false)
+        if (autoImportEnabled) {
+            val currentLaunchTime = System.currentTimeMillis()
+            val lastLaunch = sharedPrefs.getLong("last_launch", 0L)
 
-            // Update the boolean value on each click
-            countYear.setOnCheckedChangeListener { _, isChecked ->
-                countYearValue = isChecked
-            }
-
-            eventDate.setOnClickListener {
-                // Prevent double dialogs on fast click
-                if(dateDialog == null) {
-                    dateDialog = MaterialDialog(this).show {
-                        cancelable(false)
-                        cancelOnTouchOutside(false)
-                        datePicker(maxDate = endDate, currentDate = lastDate) { _, date ->
-                            val year = date.get(Calendar.YEAR)
-                            val month = date.get(Calendar.MONTH) + 1
-                            val day = date.get(Calendar.DAY_OF_MONTH)
-                            eventDateValue = LocalDate.of(year, month, day)
-                            eventDate.text = eventDateValue.format(formatter)
-                            // If ok is pressed, the last selected date is saved if the dialog is reopened
-                            lastDate.set(year, month - 1, day)
-                        }
-                    }
-                    Handler(Looper.getMainLooper()).postDelayed({ dateDialog = null }, 750)
+            // Only launch the auto import if 3 minutes are passed
+            if (lastLaunch + (3 * 60 * 1000) < currentLaunchTime) {
+                sharedPrefs.edit { putLong("last_launch", currentLaunchTime) }
+                thread {
+                    ContactsImporter(this, null)
+                        .importContacts(this, withDialog = false)
                 }
             }
 
-            // Validate each field in the form with the same watcher
-            var nameCorrect = false
-            var surnameCorrect = true // Surname is not mandatory
-            var eventDateCorrect = false
-            val watcher = object: TextWatcher {
-                override fun beforeTextChanged(charSequence: CharSequence, i: Int, i1: Int, i2: Int) {}
-                override fun onTextChanged(charSequence: CharSequence, i: Int, i1: Int, i2: Int) {}
-                override fun afterTextChanged(editable: Editable) {
-                    when {
-                        editable === name.editableText -> {
-                            val nameText = name.text.toString()
-                            if (nameText.isBlank() || !checkString(nameText)) {
-                                // Setting the error on the layout is important to make the properties work. Kotlin synthetics are being used here
-                                customView.nameEventLayout.error = getString(R.string.invalid_value_name)
-                                dialog.getActionButton(WhichButton.POSITIVE).isEnabled = false
-                                nameCorrect = false
-                            }
-                            else {
-                                nameValue = nameText
-                                customView.nameEventLayout.error = null
-                                nameCorrect = true
-                            }
-                        }
-                        editable === surname.editableText -> {
-                            val surnameText = surname.text.toString()
-                            if (!checkString(surnameText)) {
-                                // Setting the error on the layout is important to make the properties work. Kotlin synthetics are being used here
-                                customView.surnameEventLayout.error = getString(R.string.invalid_value_name)
-                                dialog.getActionButton(WhichButton.POSITIVE).isEnabled = false
-                                surnameCorrect = false
-                            }
-                            else {
-                                surnameValue = surnameText
-                                customView.surnameEventLayout.error = null
-                                surnameCorrect = true
-                            }
-                        }
-                        // Once selected, the date can't be blank anymore
-                        editable === eventDate.editableText -> eventDateCorrect = true
-                    }
-                    if(eventDateCorrect && nameCorrect && surnameCorrect) dialog.getActionButton(WhichButton.POSITIVE).isEnabled = true
-                }
-            }
+            // Schedule periodic WorkManager job that checks weekly if an import is needed
+            try {
+                val importRequest = PeriodicWorkRequestBuilder<ImportContactsWorker>(
+                    7, TimeUnit.DAYS
+                ).build()
 
-            name.addTextChangedListener(watcher)
-            surname.addTextChangedListener(watcher)
-            eventDate.addTextChangedListener(watcher)
+                WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+                    "import_contacts_periodic",
+                    ExistingPeriodicWorkPolicy.KEEP,
+                    importRequest
+                )
+            } catch (_: Exception) {
+                // ignore scheduling issues on older devices / vendors
+            }
+        } else {
+            // Cancel any previously scheduled import worker when disabled
+            try {
+                WorkManager.getInstance(this).cancelUniqueWork("import_contacts_periodic")
+            } catch (_: Exception) {
+            }
+        }
+
+        // Only the next events, without considering the search string, ordered
+        mainViewModel.allEventsUnfiltered.observe(this)
+        {
+            // Update the widgets and the stats, to avoid strange behaviors when searching
+            updateWidget()
+            mainViewModel.getStats(it, this)
+        }
+
+        onBackPressedDispatcher.addCallback(this, backHomeCallback)
+    }
+
+    override fun onDestroy() {
+        // TODO Experimental settings
+        val autoExport = sharedPrefs.getBoolean("auto_export", false)
+        val lastExport = sharedPrefs.getLong("last_auto_export", 0)
+        val exportFolderUri = sharedPrefs.getString("export_folder", "")?.toUri()
+        // Max one auto export every 30 seconds
+        val allowedExportTime = lastExport + 30
+        val currentTime = LocalDateTime.now().toEpochSecond(ZoneOffset.UTC)
+        if (autoExport && currentTime > allowedExportTime) {
+            sharedPrefs.edit { putLong("last_auto_export", currentTime) }
+            val thread = Thread {
+                BirdayExporter.exportEvents(this, uri = exportFolderUri, autoBackup = true)
+            }
+            thread.start()
+        }
+        super.onDestroy()
+    }
+
+    private fun NavController.navigateWithOptions(@IdRes destination: Int) {
+        // Only way to use custom animations with the bottom navigation bar
+        val options = NavOptions.Builder()
+            .setLaunchSingleTop(true)
+            .setEnterAnim(R.anim.nav_enter_anim)
+            .setExitAnim(R.anim.nav_exit_anim)
+            .setPopEnterAnim(R.anim.nav_pop_enter_anim)
+            .setPopExitAnim(R.anim.nav_pop_exit_anim)
+            .setPopUpTo(R.id.nav_graph, true)
+            .build()
+
+        navigate(destination, null, options)
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        // Manage refresh from settings, since there's a bug where the refresh doesn't work properly
+        val refreshed = sharedPrefs.getBoolean("refreshed", false)
+        if (refreshed) {
+            sharedPrefs.edit { putBoolean("refreshed", false) }
+            super.onSaveInstanceState(outState)
+        } else {
+            // Dirty, dirty fix to avoid TransactionTooBigException:
+            // it will restore the home fragment when the theme is changed from system for example,
+            // and the app is in recent apps. No issues for screen rotations, keyboard and so on
+            super.onSaveInstanceState(Bundle())
         }
     }
 
-    // Create the NotificationChannel. When created the first time, this code does nothing
+    // Update the existing widgets with the newest data and the onclick action
+    private fun updateWidget() {
+        val intentUpcoming = Intent(AppWidgetManager.ACTION_APPWIDGET_UPDATE)
+        intentUpcoming.component = ComponentName(this, EventWidgetProvider::class.java)
+        sendBroadcast(intentUpcoming)
+
+        val intentMinimal = Intent(AppWidgetManager.ACTION_APPWIDGET_UPDATE)
+        intentMinimal.component = ComponentName(this, MinimalWidgetProvider::class.java)
+        sendBroadcast(intentMinimal)
+    }
+
+    // Create the NotificationChannel. This code does nothing when it already exists
     private fun createNotificationChannel() {
-        val soundUri = Uri.parse(ContentResolver.SCHEME_ANDROID_RESOURCE + "://" + applicationContext.packageName + "/" + R.raw.birday_notification)
+        val soundUri =
+            (ContentResolver.SCHEME_ANDROID_RESOURCE + "://" + applicationContext.packageName + "/" + R.raw.birday_notification).toUri()
         val attributes: AudioAttributes = Builder()
             .setUsage(AudioAttributes.USAGE_NOTIFICATION)
             .build()
         val name = getString(R.string.events_notification_channel)
         val descriptionText = getString(R.string.events_channel_description)
         val importance = NotificationManager.IMPORTANCE_HIGH
-        val channel = NotificationChannel("events_channel", name, importance).apply { description = descriptionText }
+        val channel = NotificationChannel("events_channel", name, importance).apply {
+            description = descriptionText
+        }
         // Additional tuning over sound, vibration and notification light
         channel.setSound(soundUri, attributes)
         channel.enableLights(true)
         channel.lightColor = Color.GREEN
         channel.enableVibration(true)
         // Register the channel with the system
-        val notificationManager: NotificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val notificationManager: NotificationManager =
+            getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.createNotificationChannel(channel)
     }
 
     // Choose a backup registering a callback and following the latest guidelines
-    val selectBackup = registerForActivityResult(ActivityResultContracts.GetContent())  { fileUri: Uri? ->
-        try {
-            val birdayImporter = BirdayImporter(this, null)
-            if (fileUri != null) birdayImporter.importBirthdays(this, fileUri)
+    val selectBackup =
+        registerForActivityResult(ActivityResultContracts.GetContent()) { fileUri: Uri? ->
+            try {
+                if (fileUri == null) return@registerForActivityResult
+                // Select the correct importer. Always use native import, except for JSON and csv
+                when (getFileName(fileUri).split(".").last()) {
+                    "json" -> {
+                        val jsonImporter = JsonImporter(this, null)
+                        jsonImporter.importEventsJson(this, fileUri)
+                    }
+
+                    "csv", "xls", "xlsx" -> {
+                        val csvImporter = CsvImporter(this, null)
+                        csvImporter.importEventsCsv(this, fileUri)
+                    }
+
+                    else -> {
+                        val birdayImporter = BirdayImporter(this, null)
+                        birdayImporter.importEvents(this, fileUri)
+                    }
+                }
+            } catch (e: IOException) {
+                // Invalid file, other errors, can't even try to import
+                e.printStackTrace()
+                showSnackbar(getString(R.string.birday_import_failure))
+            }
         }
-        catch (e: IOException) {
-            e.printStackTrace()
+
+    // Birday DB backup
+    val saveBackup =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode != RESULT_OK) return@registerForActivityResult
+            val uri: Uri = result.data?.data ?: return@registerForActivityResult
+            // Save the selected uri to make it accessible for auto backup
+            sharedPrefs.edit(commit = true) { putString("export_folder", uri.toString()) }
+            lifecycleScope.launch {
+                val exportedPath = withContext(Dispatchers.IO) {
+                    BirdayExporter.exportEvents(
+                        applicationContext,
+                        uri,
+                        false
+                    )
+                }
+                if (exportedPath.isNotEmpty()) {
+                    showSnackbar(getString(R.string.birday_export_success))
+                    shareUri(this@MainActivity, uri)
+                } else {
+                    showSnackbar(getString(R.string.birday_export_failure))
+                }
+            }
         }
-    }
+
+    // CSV backup
+    val saveCsv =
+        registerForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
+            if (uri == null) return@registerForActivityResult
+            lifecycleScope.launch {
+                val exportedPath = withContext(Dispatchers.IO) {
+                    CsvExporter.exportEventsCsv(applicationContext, uri)
+                }
+                if (exportedPath.isNotEmpty()) {
+                    showSnackbar(getString(R.string.birday_export_success))
+                    shareUri(this@MainActivity, uri)
+                } else {
+                    showSnackbar(getString(R.string.birday_export_failure))
+                }
+            }
+        }
+
+    // JSON backup
+    val saveJson =
+        registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+            if (uri == null) return@registerForActivityResult
+            lifecycleScope.launch {
+                val exportedPath = withContext(Dispatchers.IO) {
+                    JsonExporter.exportEventsJson(applicationContext, uri)
+                }
+                if (exportedPath.isNotEmpty()) {
+                    showSnackbar(getString(R.string.birday_export_success))
+                    shareUri(this@MainActivity, uri)
+                } else {
+                    showSnackbar(getString(R.string.birday_export_failure))
+                }
+            }
+        }
 
 
     // Some utility functions, used from every fragment connected to this activity
 
+    // Given an uri, find the file name
+    private fun getFileName(uri: Uri): String {
+        var result = ""
+        if (uri.scheme == "content") {
+            val cursor: Cursor? = contentResolver.query(
+                uri,
+                arrayOf(OpenableColumns.DISPLAY_NAME),
+                null,
+                null,
+                null
+            )
+            cursor.use {
+                if (cursor != null && cursor.moveToFirst()) {
+                    val columnIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (columnIndex == -1) return@use
+                    result = cursor.getString(columnIndex)
+                }
+            }
+        }
+        return result
+    }
+
     // Vibrate using a standard vibration pattern
+    // or use system Haptic feedback if vibration is disabled
     fun vibrate() {
-        val vib = this.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
-        if (sharedPrefs.getBoolean("vibration", true)) // Vibrate if the vibration in options is set to on
+        val active = sharedPrefs.getBoolean("vibration", true)
+        if (!active) return
+
+        // Deprecated for no reason
+        val vib = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val vibratorManager =
+                this.getSystemService(VIBRATOR_MANAGER_SERVICE) as VibratorManager
+            vibratorManager.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            getSystemService(VIBRATOR_SERVICE) as Vibrator
+        }
+
+        // Create a short vibration for earlier Android versions
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R)
             vib.vibrate(VibrationEffect.createOneShot(30, VibrationEffect.DEFAULT_AMPLITUDE))
+        // Or use system Haptic feedback if available
+        else
+            if (vib.areEffectsSupported(VibrationEffect.EFFECT_CLICK)[0] == Vibrator.VIBRATION_EFFECT_SUPPORT_YES)
+                vib.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_CLICK))
+    }
+
+    // Animate an animated vector drawable thus centralizing this operation
+    fun animateAvd(
+        imageView: ImageView,
+        avd: Int = R.drawable.animated_experimental_danger,
+        endDelay: Long = 0
+    ) {
+        val loopAnimation = sharedPrefs.getBoolean("loop_avd", true)
+        imageView.applyLoopingAnimatedVectorDrawable(
+            animatedVector = avd,
+            disableLooping = !loopAnimation,
+            endDelay = endDelay
+        )
+    }
+
+    // Show a snackbar containing a given text and an optional action, with a 5 seconds duration
+    fun showSnackbar(
+        content: String,
+        attachView: View? = null,
+        action: (() -> Unit)? = null,
+        actionText: String? = null,
+    ) {
+        val snackbar = Snackbar.make(binding.root, content, 5000)
+        snackbar.isGestureInsetBottomIgnored = true
+        if (attachView != null)
+            snackbar.anchorView = attachView
+        else
+            snackbar.anchorView = binding.bottomBar
+        if (action != null) {
+            snackbar.setActionTextColor(getThemeColor(android.R.attr.colorSecondary, this))
+            snackbar.setAction(actionText) {
+                action()
+            }
+        }
+        snackbar.show()
+    }
+
+    // Show a generic loading indicator
+    fun showLoadingIndicator() {
+        binding.birdayLoadingIndicator.visibility = View.VISIBLE
+    }
+
+    // Hide the generic loading indicator
+    fun hideLoadingIndicator() {
+        binding.birdayLoadingIndicator.visibility = View.GONE
+    }
+
+    // Insert a previously deleted event back in the database
+    fun insertBack(eventResult: EventResult) {
+        mainViewModel.insert(resultToEvent(eventResult))
+    }
+
+    // Force refresh the stats, useful when the events are the same, but something else changes
+    fun forceRefreshStats() {
+        val events = mainViewModel.allEventsUnfiltered.value
+        if (events != null)
+            mainViewModel.getStats(events, this)
+    }
+
+    // Change the fab to show a delete icon
+    fun toggleDeleteFab(active: Boolean = false) {
+        val addFab = binding.fab
+        val deleteFab = binding.fabDelete
+        val bottomBarId = binding.bottomBar.id
+        val addParams: CoordinatorLayout.LayoutParams =
+            addFab.layoutParams as CoordinatorLayout.LayoutParams
+        val deleteParams: CoordinatorLayout.LayoutParams =
+            deleteFab.layoutParams as CoordinatorLayout.LayoutParams
+
+        // Case 1: add fab currently hidden, it needs to be active
+        if (!active && addFab.isGone) {
+            // Change anchors to avoid visual problems
+            addParams.anchorId = bottomBarId
+            addFab.layoutParams = addParams
+
+            deleteParams.anchorId = View.NO_ID
+            deleteFab.layoutParams = deleteParams
+
+            addFab.visibility = View.VISIBLE
+            deleteFab.visibility = View.GONE
+            animateAvd(
+                deleteFab,
+                R.drawable.animated_delete,
+                3000L,
+            )
+            animateAvd(
+                addFab,
+                R.drawable.animated_add_event,
+                5000L
+            )
+        }
+
+        // Case 2: delete fab currently hidden, it needs to be active
+        if (active && deleteFab.isGone) {
+            // Change anchors to avoid visual problems
+            addParams.anchorId = View.NO_ID
+            addFab.layoutParams = addParams
+
+            deleteParams.anchorId = bottomBarId
+            deleteFab.layoutParams = deleteParams
+
+            addFab.visibility = View.GONE
+            deleteFab.visibility = View.VISIBLE
+            animateAvd(
+                deleteFab,
+                R.drawable.animated_delete,
+                3000L
+            )
+            animateAvd(
+                addFab,
+                R.drawable.animated_add_event,
+                5000L,
+            )
+        }
+    }
+
+    // Show a dialog to select the events to import
+    fun showImportDialog(
+        events: List<Event>,
+        title: String? = null,
+        message: String? = null,
+        icon: Int = R.drawable.ic_backup_restore_24dp,
+        showSnack: Boolean = true,
+        onInserted: (() -> Unit)? = null
+    ) {
+        // Shouldn't happen
+        if (events.isEmpty()) return
+
+        // Prepare the dialog content
+        val sp = PreferenceManager.getDefaultSharedPreferences(this)
+        val surnameFirst = sp.getBoolean("surname_first", false)
+        val items: Array<CharSequence> = events.map { ev ->
+            formatTextPreview(
+                eventToResult(ev),
+                this,
+                surnameFirst = surnameFirst,
+                multiline = false
+            )
+        }.toTypedArray()
+
+        // Default: all the events are unselected
+        val checked = BooleanArray(items.size) { false }
+
+        val builder = MaterialAlertDialogBuilder(this)
+        if (!title.isNullOrBlank()) builder.setTitle(title)
+        if (!message.isNullOrBlank()) builder.setMessage(message)
+        builder.setIcon(icon)
+
+        builder.setMultiChoiceItems(items, checked) { _, which, isChecked ->
+            checked[which] = isChecked
+        }
+            .setPositiveButton(android.R.string.ok) { dialogInterface, _ ->
+                val toInsert = events.filterIndexed { i, _ -> checked[i] }
+                if (toInsert.isNotEmpty()) {
+                    mainViewModel.insertAll(toInsert)
+                    if (showSnack) {
+                        showSnackbar(getString(R.string.import_success))
+                    }
+                    onInserted?.invoke()
+                } else {
+                    if (showSnack) showSnackbar(getString(R.string.import_nothing_found))
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .setNeutralButton(android.R.string.selectAll, null)
+
+        val dialog = builder.create()
+
+        dialog.setOnShowListener {
+            val neutralButton = dialog.getButton(AlertDialog.BUTTON_NEUTRAL)
+            val listView = dialog.listView
+            neutralButton.setOnClickListener {
+                val allSelected = checked.all { it }
+                val newValue = !allSelected
+                for (i in checked.indices) {
+                    checked[i] = newValue
+                    listView.setItemChecked(i, newValue)
+                }
+            }
+            listView.setOnItemClickListener { _, _, position, _ ->
+                checked[position] = listView.isItemChecked(position)
+            }
+        }
+        dialog.show()
     }
 
     // Ask contacts permission
     fun askContactsPermission(code: Int = 101): Boolean {
-        return if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
-                ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.READ_CONTACTS), code)
-                ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
-            }
-        else true
+        return if (ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.READ_CONTACTS
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.READ_CONTACTS),
+                code
+            )
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.READ_CONTACTS
+            ) == PackageManager.PERMISSION_GRANTED
+        } else true
+    }
+
+    // Ask read calendar permission
+    fun askCalendarPermission(code: Int = 301): Boolean {
+        return if (ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.READ_CALENDAR
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.READ_CALENDAR),
+                code
+            )
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.READ_CALENDAR
+            ) == PackageManager.PERMISSION_GRANTED
+        } else true
+    }
+
+    // Ask write calendar permission
+    fun askWriteCalendarPermission(code: Int = 401): Boolean {
+        return if (ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.WRITE_CALENDAR
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.WRITE_CALENDAR),
+                code
+            )
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.WRITE_CALENDAR
+            ) == PackageManager.PERMISSION_GRANTED
+        } else true
+    }
+
+    // Ask notification permission
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+    fun askNotificationPermission(code: Int = 201): Boolean {
+        return if (ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                code
+            )
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+        } else true
     }
 
     // Manage user response to permission requests
-    override fun onRequestPermissionsResult(requestCode : Int, permissions: Array<String>, grantResults: IntArray){
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<String>,
+        grantResults: IntArray
+    ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         when (requestCode) {
-            // Contacts at startup, show a toast only for permission denied (don't ask again not selected)
+            // Contacts at startup, show a snackbar only for permission denied (don't ask again not selected)
             101 -> {
                 if (grantResults.isNotEmpty() && grantResults[0] != PackageManager.PERMISSION_GRANTED) {
                     if (shouldShowRequestPermissionRationale(Manifest.permission.READ_CONTACTS))
-                        Toast.makeText(this, getString(R.string.missing_permission_contacts), Toast.LENGTH_LONG).show()
+                        showSnackbar(getString(R.string.missing_permission_contacts))
+                } else if (grantResults.isNotEmpty() /* && grantResults[0] == PackageManager.PERMISSION_GRANTED */) {
+                    // Show Bottom sheet for import
+                    ImportContactsBottomSheet().showIfNotAdded(
+                        supportFragmentManager,
+                        ImportContactsBottomSheet.TAG
+                    )
                 }
             }
             // Contacts while trying to import from contacts
             102 -> {
                 if (grantResults.isNotEmpty() && grantResults[0] != PackageManager.PERMISSION_GRANTED) {
                     if (shouldShowRequestPermissionRationale(Manifest.permission.READ_CONTACTS))
-                        Toast.makeText(this, getString(R.string.missing_permission_contacts), Toast.LENGTH_LONG).show()
-                    else Toast.makeText(this, getString(R.string.missing_permission_contacts_forever), Toast.LENGTH_LONG).show()
-                }
-                else {
+                        showSnackbar(
+                            getString(R.string.missing_permission_contacts),
+                            actionText = getString(R.string.cancel),
+                            action = fun() {
+                                askContactsPermission()
+                            })
+                    else showSnackbar(
+                        getString(R.string.missing_permission_contacts_forever),
+                        actionText = getString(R.string.title_settings),
+                        action = fun() {
+                            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                data = Uri.fromParts("package", packageName, null)
+                            })
+                        })
+                } else {
                     val contactImporter = ContactsImporter(this, null)
                     contactImporter.importContacts(this)
+                }
+            }
+            // Notifications request at startup, plus contacts after
+            201 -> {
+                if (grantResults.isNotEmpty() && grantResults[0] != PackageManager.PERMISSION_GRANTED) {
+                    if (shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS))
+                        showSnackbar(
+                            getString(R.string.missing_permission_notifications),
+                            actionText = getString(R.string.cancel),
+                            action =
+                                fun() {
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                        askNotificationPermission()
+                                    }
+                                })
+                    else showSnackbar(
+                        getString(R.string.missing_permission_notifications_forever),
+                        actionText = getString(R.string.title_settings),
+                        action = fun() {
+                            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                data = Uri.fromParts("package", packageName, null)
+                            })
+                        })
+                }
+                // Request contacts permission in every case
+                askContactsPermission()
+            }
+            // Calendar permission when importing from calendar
+            302 -> {
+                if (grantResults.isNotEmpty() && grantResults[0] != PackageManager.PERMISSION_GRANTED) {
+                    if (shouldShowRequestPermissionRationale(Manifest.permission.READ_CALENDAR))
+                        showSnackbar(
+                            getString(R.string.missing_permission_calendar),
+                            actionText = getString(R.string.cancel),
+                            action = fun() {
+                                askCalendarPermission()
+                            })
+                    else showSnackbar(
+                        getString(R.string.missing_permission_calendar_forever),
+                        actionText = getString(R.string.title_settings),
+                        action = fun() {
+                            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                data = Uri.fromParts("package", packageName, null)
+                            })
+                        })
+                } else {
+                    val calendarImporter = CalendarImporter(this, null)
+                    calendarImporter.importCalendar(this)
+                }
+            }
+
+            402 -> {
+                if (grantResults.isNotEmpty() && grantResults[0] != PackageManager.PERMISSION_GRANTED) {
+                    if (shouldShowRequestPermissionRationale(Manifest.permission.WRITE_CALENDAR))
+                        showSnackbar(
+                            getString(R.string.missing_permission_calendar),
+                            actionText = getString(R.string.cancel),
+                            action = fun() {
+                                askWriteCalendarPermission()
+                            })
+                    else showSnackbar(
+                        getString(R.string.missing_permission_calendar_forever),
+                        actionText = getString(R.string.title_settings),
+                        action = fun() {
+                            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                data = Uri.fromParts("package", packageName, null)
+                            })
+                        })
+                } else {
+                    val calendarExporter = CalendarExporter(this, null)
+                    calendarExporter.exportCalendar(this)
                 }
             }
         }

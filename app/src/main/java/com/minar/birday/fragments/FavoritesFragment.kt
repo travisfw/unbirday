@@ -1,89 +1,115 @@
 package com.minar.birday.fragments
 
-import android.graphics.drawable.Drawable
+import android.content.SharedPreferences
+import android.content.res.Configuration
+import android.os.Build
 import android.os.Bundle
 import android.text.SpannableStringBuilder
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.EditText
-import android.widget.ImageView
 import android.widget.TextView
-import android.widget.Toast
-import androidx.annotation.DrawableRes
 import androidx.fragment.app.Fragment
-import androidx.lifecycle.ViewModelProvider
+import androidx.fragment.app.activityViewModels
+import androidx.navigation.findNavController
+import androidx.navigation.fragment.findNavController
 import androidx.preference.PreferenceManager
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
-import androidx.vectordrawable.graphics.drawable.Animatable2Compat
-import androidx.vectordrawable.graphics.drawable.AnimatedVectorDrawableCompat
-import com.afollestad.materialdialogs.LayoutMode
-import com.afollestad.materialdialogs.MaterialDialog
-import com.afollestad.materialdialogs.bottomsheets.BottomSheet
-import com.afollestad.materialdialogs.customview.customView
-import com.afollestad.materialdialogs.customview.getCustomView
-import com.facebook.shimmer.ShimmerFrameLayout
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.minar.birday.R
 import com.minar.birday.activities.MainActivity
 import com.minar.birday.adapters.FavoritesAdapter
-import com.minar.birday.listeners.OnItemClickListener
+import com.minar.birday.animators.BirdayRecyclerAnimator
+import com.minar.birday.databinding.DialogNotesBinding
+import com.minar.birday.databinding.FragmentFavoritesBinding
+import com.minar.birday.fragments.dialogs.StatsBottomSheet
 import com.minar.birday.model.Event
-import com.minar.birday.model.EventResult
 import com.minar.birday.utilities.StatsGenerator
+import com.minar.birday.utilities.addInsetsByPadding
+import com.minar.birday.utilities.getRemainingDays
+import com.minar.birday.utilities.getThemeColor
+import com.minar.birday.utilities.isBirthday
 import com.minar.birday.viewmodels.MainViewModel
-import kotlinx.android.synthetic.main.dialog_stats.view.*
-import kotlinx.android.synthetic.main.fragment_favorites.view.*
-import kotlin.math.min
+import java.time.LocalDate
+import java.util.Locale
+import androidx.core.content.edit
+
 
 class FavoritesFragment : Fragment() {
-    private lateinit var rootView: View
-    private lateinit var recyclerView: RecyclerView
-    private lateinit var mainViewModel: MainViewModel
+    private val mainViewModel: MainViewModel by activityViewModels()
     private lateinit var adapter: FavoritesAdapter
-    private lateinit var fullStats: SpannableStringBuilder
     private lateinit var act: MainActivity
+    private lateinit var sharedPrefs: SharedPreferences
+    private var fullStats: SpannableStringBuilder? = null
+    private var _binding: FragmentFavoritesBinding? = null
+    private val binding get() = _binding!!
+    private var _dialogNotesBinding: DialogNotesBinding? = null
+    private val dialogNotesBinding get() = _dialogNotesBinding!!
     private var totalEvents = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        adapter = FavoritesAdapter()
+        adapter = FavoritesAdapter(
+            onItemClick = { position -> onItemClick(position) },
+            onItemLongClick = { position -> onItemLongClick(position) }
+        )
         act = activity as MainActivity
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        // Check the orientation of the screen, minimize the card on landscape
+        if (newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE) {
+            binding.root.progress = 1F
+        } else if (newConfig.orientation == Configuration.ORIENTATION_PORTRAIT) {
+            binding.root.progress = sharedPrefs.getFloat("favorite_motion_state", 0.0F)
+        }
     }
 
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
         savedInstanceState: Bundle?
-    ): View? {
-        val v: View = inflater.inflate(R.layout.fragment_favorites, container, false)
-        val statsImage = v.findViewById<ImageView>(R.id.statsImage)
-        val shimmer = v.findViewById<ShimmerFrameLayout>(R.id.favoritesCardShimmer)
-        val sharedPrefs = PreferenceManager.getDefaultSharedPreferences(requireContext())
+    ): View {
+        _binding = FragmentFavoritesBinding.inflate(inflater, container, false)
+        return binding.root
+    }
+
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+        val statsImage = binding.statsImage
+        val shimmer = binding.favoritesCardShimmer
+        sharedPrefs = PreferenceManager.getDefaultSharedPreferences(requireContext())
         val shimmerEnabled = sharedPrefs.getBoolean("shimmer", false)
-        val favoriteMotionLayout = v.favoritesMain
-        val favoritesCard = v.favoritesCard
-        val favoritesMiniFab = v.favoritesMiniFab
+        val astrologyDisabled = sharedPrefs.getBoolean("disable_astrology", false)
+        val favoriteMotionLayout = binding.favoritesMain
+        val favoritesCard = binding.favoritesCard
+        val favoritesMiniFab = binding.favoritesMiniFab
+        val overviewButton = binding.overviewButton
         if (shimmerEnabled) shimmer.startShimmer()
-        statsImage.applyLoopingAnimatedVectorDrawable(R.drawable.animated_candle)
+        act.animateAvd(statsImage, R.drawable.animated_candle_new)
 
         // Set motion layout state, since it's saved
         favoriteMotionLayout.progress = sharedPrefs.getFloat("favorite_motion_state", 0.0F)
 
         // Vibration on the mini fab (with manual managing of the transition)
         favoritesMiniFab.setOnClickListener {
+            act.vibrate()
             when (favoriteMotionLayout.progress) {
                 0.0F -> {
-                    act.vibrate()
                     favoriteMotionLayout.transitionToEnd()
-                    sharedPrefs.edit().putFloat("favorite_motion_state", 1.0F).apply()
+                    sharedPrefs.edit { putFloat("favorite_motion_state", 1.0F) }
                 }
+
                 1.0F -> {
-                    act.vibrate()
                     favoriteMotionLayout.transitionToStart()
-                    sharedPrefs.edit().putFloat("favorite_motion_state", 0.0F).apply()
+                    sharedPrefs.edit { putFloat("favorite_motion_state", 0.0F) }
                 }
             }
+        }
+
+        // Activate the overscroll effect on Android 12 and above
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            binding.favoritesRecycler.overScrollMode = View.OVER_SCROLL_ALWAYS
         }
 
         // Show full stats on long press too
@@ -96,141 +122,255 @@ class FavoritesFragment : Fragment() {
         favoritesCard.setOnClickListener {
             showStatsSheet()
         }
-        rootView = v
 
         // Setup the recycler view
-        initializeRecyclerView()
-        setUpAdapter()
-
-        mainViewModel = ViewModelProvider(this).get(MainViewModel::class.java)
-        mainViewModel.allFavoriteEvents.observe(viewLifecycleOwner, { events ->
-            // Update the cached copy of the words in the adapter
-            if (events != null && events.isNotEmpty()) {
-                removePlaceholder()
-                adapter.submitList(events)
-            }
-        })
-        // AllEvents contains everything, since the query string is reset when the fragment changes
-        mainViewModel.allEvents.observe(viewLifecycleOwner, { eventList ->
-            // Under a minimum size, no stats will be shown (at least 5 events containing a year)
-            if (eventList.filter { it.yearMatter == true }.size > 4) generateStat(eventList)
-            else fullStats = SpannableStringBuilder(
-                requireActivity().applicationContext.getString(
-                    R.string.no_stats_description
-                )
-            )
-            totalEvents = eventList.size
-        })
-
-        return v
-    }
-
-    // Initialize the necessary parts of the recycler view
-    private fun initializeRecyclerView() {
-        recyclerView = rootView.findViewById(R.id.favoritesRecycler)
-        recyclerView.layoutManager = LinearLayoutManager(activity)
-        recyclerView.adapter = adapter
-    }
-
-    // Manage the onclick actions, or the long click (unused atm)
-    private fun setUpAdapter() {
-        adapter.setOnItemClickListener(onItemClickListener = object : OnItemClickListener {
-            override fun onItemClick(position: Int, view: View?) {
-                act.vibrate()
-                val event = adapter.getItem(position)
-                val title = getString(R.string.notes) + " - " + event.name
-                MaterialDialog(act).show {
-                    title(text = title)
-                    icon(R.drawable.ic_note_24dp)
-                    cornerRadius(res = R.dimen.rounded_corners)
-                    customView(R.layout.dialog_notes, scrollable = true)
-                    val noteTextField = getCustomView().findViewById<EditText>(R.id.favoritesNotes)
-                    noteTextField.setText(event.notes)
-                    negativeButton(R.string.cancel) {
-                        dismiss()
-                    }
-                    positiveButton {
-                        val note = noteTextField.text.toString().trim()
-                        val tuple = Event(
-                            id = event.id,
-                            originalDate = event.originalDate,
-                            name = event.name,
-                            yearMatter = event.yearMatter,
-                            surname = event.surname,
-                            favorite = event.favorite,
-                            notes = note,
-                            image = event.image
-                        )
-                        mainViewModel.update(tuple)
-                        dismiss()
-                    }
+        val recycler = binding.favoritesRecycler
+        recycler.adapter = adapter
+        with(mainViewModel) {
+            getFavorites().observe(viewLifecycleOwner) { events ->
+                // Update the cached copy in the adapter
+                if (events != null && events.isNotEmpty()) {
+                    removePlaceholder()
+                    adapter.submitList(events)
+                    recycler.itemAnimator = BirdayRecyclerAnimator()
+                }
+                if (events.isNullOrEmpty()) {
+                    adapter.submitList(emptyList())
+                    restorePlaceholder()
                 }
             }
+        }
 
-            // TODO reassign an action to the long press
-            override fun onItemLongClick(position: Int, view: View?): Boolean {
-                return true
+        // Add insets
+        recycler.addInsetsByPadding(bottom = true)
+
+        // Set the overview button
+        overviewButton.setOnClickListener {
+            // Vibrate and navigate to the overview screen
+            act.vibrate()
+            requireView().findNavController()
+                .navigate(R.id.action_navigationFavorites_to_overviewFragment)
+        }
+
+        // Set a tutorial snack bar on long press
+        overviewButton.setOnLongClickListener {
+            act.vibrate()
+            act.showSnackbar(getString(R.string.overview_description))
+            true
+        }
+
+        // Set the data which requires the complete and unfiltered event list
+        with(binding) {
+            mainViewModel.allEventsUnfiltered.observe(viewLifecycleOwner) { events ->
+                totalEvents = events.size
+
+                // Quick glance - alpha set to .3 for 1 event, .6 for 2 events, 1 for 3+ events
+                if (events != null) {
+                    val today = LocalDate.now()
+                    val nextDays = buildList {
+                        for (i in 0..9L) this.add(today.plusDays(i).dayOfMonth)
+                    }
+
+                    // Prepare the dots and the UI, while resetting the opacity
+                    val primary = getThemeColor(R.attr.colorPrimary, act)
+                    val onPrimary = getThemeColor(R.attr.colorOnPrimary, act)
+                    overviewDot1.setColorFilter(primary, android.graphics.PorterDuff.Mode.SRC_IN)
+                    overviewText1.text = nextDays[0].toString()
+                    overviewDot1.alpha = .0F
+
+                    overviewDot2.setColorFilter(primary, android.graphics.PorterDuff.Mode.SRC_IN)
+                    overviewText2.text = nextDays[1].toString()
+                    overviewDot2.alpha = .0F
+
+                    overviewDot3.setColorFilter(primary, android.graphics.PorterDuff.Mode.SRC_IN)
+                    overviewText3.text = nextDays[2].toString()
+                    overviewDot3.alpha = .0F
+
+                    overviewDot4.setColorFilter(primary, android.graphics.PorterDuff.Mode.SRC_IN)
+                    overviewText4.text = nextDays[3].toString()
+                    overviewDot4.alpha = .0F
+
+                    overviewDot5.setColorFilter(primary, android.graphics.PorterDuff.Mode.SRC_IN)
+                    overviewText5.text = nextDays[4].toString()
+                    overviewDot5.alpha = .0F
+
+                    overviewDot6.setColorFilter(primary, android.graphics.PorterDuff.Mode.SRC_IN)
+                    overviewText6.text = nextDays[5].toString()
+                    overviewDot6.alpha = .0F
+
+                    overviewDot7.setColorFilter(primary, android.graphics.PorterDuff.Mode.SRC_IN)
+                    overviewText7.text = nextDays[6].toString()
+                    overviewDot7.alpha = .0F
+
+                    overviewDot8.setColorFilter(primary, android.graphics.PorterDuff.Mode.SRC_IN)
+                    overviewText8.text = nextDays[7].toString()
+                    overviewDot8.alpha = .0F
+
+                    overviewDot9.setColorFilter(primary, android.graphics.PorterDuff.Mode.SRC_IN)
+                    overviewText9.text = nextDays[8].toString()
+                    overviewDot9.alpha = .0F
+
+                    overviewDot10.setColorFilter(primary, android.graphics.PorterDuff.Mode.SRC_IN)
+                    overviewText10.text = nextDays[9].toString()
+                    overviewDot10.alpha = .0F
+
+                    // Raise the opacity for each event in that day, until events farther than 9 days
+                    val alphaList: MutableList<Float> = MutableList(10) { 0F }
+                    for (event in events) {
+                        when (getRemainingDays(event.nextDate!!)) {
+                            0 -> alphaList[0] += .30F
+                            1 -> alphaList[1] += .30F
+                            2 -> alphaList[2] += .30F
+                            3 -> alphaList[3] += .30F
+                            4 -> alphaList[4] += .30F
+                            5 -> alphaList[5] += .30F
+                            6 -> alphaList[6] += .30F
+                            7 -> alphaList[7] += .30F
+                            8 -> alphaList[8] += .30F
+                            9 -> alphaList[9] += .30F
+                            else -> break
+                        }
+                    }
+
+                    // Remove values higher than 1, since they make no sense for alpha value
+                    alphaList.forEach { it.coerceAtMost(1F) }
+
+                    // Update the opacities
+                    overviewDot1.alpha = alphaList[0]
+                    overviewDot2.alpha = alphaList[1]
+                    overviewDot3.alpha = alphaList[2]
+                    overviewDot4.alpha = alphaList[3]
+                    overviewDot5.alpha = alphaList[4]
+                    overviewDot6.alpha = alphaList[5]
+                    overviewDot7.alpha = alphaList[6]
+                    overviewDot8.alpha = alphaList[7]
+                    overviewDot9.alpha = alphaList[8]
+                    overviewDot10.alpha = alphaList[9]
+
+                    // Make sure the text is readable
+                    if (overviewDot1.alpha > .7) overviewText1.setTextColor(onPrimary)
+                    if (overviewDot2.alpha > .7) overviewText2.setTextColor(onPrimary)
+                    if (overviewDot3.alpha > .7) overviewText3.setTextColor(onPrimary)
+                    if (overviewDot4.alpha > .7) overviewText4.setTextColor(onPrimary)
+                    if (overviewDot5.alpha > .7) overviewText5.setTextColor(onPrimary)
+                    if (overviewDot6.alpha > .7) overviewText6.setTextColor(onPrimary)
+                    if (overviewDot7.alpha > .7) overviewText7.setTextColor(onPrimary)
+                    if (overviewDot8.alpha > .7) overviewText8.setTextColor(onPrimary)
+                    if (overviewDot9.alpha > .7) overviewText9.setTextColor(onPrimary)
+                    if (overviewDot10.alpha > .7) overviewText10.setTextColor(onPrimary)
+                }
+            }
+        }
+
+        mainViewModel.fullStats.observe(viewLifecycleOwner) {
+            // Stats - Under a minimum size, no stats will be shown (at least 5 birthdays containing a year)
+            val currentEvents = mainViewModel.allEventsUnfiltered.value ?: return@observe
+            if (currentEvents.filter { it.yearMatter == true && isBirthday(it) }.size < 5) {
+                fullStats = SpannableStringBuilder(
+                    requireActivity().applicationContext.getString(
+                        R.string.no_stats_description
+                    )
+                )
+                return@observe
             }
 
-        })
+            val cardSubtitle: TextView = binding.statsSubtitle
+            val cardDescription: TextView = binding.statsDescription
+            val generator = StatsGenerator(currentEvents, context, astrologyDisabled)
+            val randomStat = generator.generateRandomStat()
+            fullStats = mainViewModel.fullStats.value
+            // Stop all UI updates if the fragment is not visible
+            cardSubtitle.text = randomStat
+            val summary =
+                resources.getQuantityString(R.plurals.event, currentEvents.size, currentEvents.size)
+                    .replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
+            cardDescription.text = summary
+        }
+    }
+
+    override fun onDestroyView() {
+        super.onDestroyView()
+        // Reset each binding to null to follow the best practice
+        _binding = null
+        _dialogNotesBinding = null
+    }
+
+    private fun onItemClick(position: Int) {
+        act.vibrate()
+        _dialogNotesBinding = DialogNotesBinding.inflate(LayoutInflater.from(context))
+        val event = adapter.getItem(position)
+        val notesTitle = "${getString(R.string.notes)} - ${event.name}"
+        val noteTextField = dialogNotesBinding.favoritesNotes
+        noteTextField.setText(event.notes)
+
+        // Native dialog
+        MaterialAlertDialogBuilder(act)
+            .setView(dialogNotesBinding.root)
+            .setTitle(notesTitle)
+            .setIcon(R.drawable.ic_note_24dp)
+            .setPositiveButton(resources.getString(android.R.string.ok)) { dialog, _ ->
+                val note = noteTextField.text.toString().trim()
+                val tuple = Event(
+                    id = event.id,
+                    type = event.type,
+                    originalDate = event.originalDate,
+                    name = event.name,
+                    yearMatter = event.yearMatter,
+                    surname = event.surname,
+                    favorite = event.favorite,
+                    notes = note,
+                    image = event.image
+                )
+                mainViewModel.update(tuple)
+                dialog.dismiss()
+            }
+            .setNegativeButton(resources.getString(android.R.string.cancel)) { dialog, _ ->
+                dialog.dismiss()
+            }
+            .show()
+    }
+
+    // Open the details screen on long press, just another shortcut
+    private fun onItemLongClick(position: Int) {
+        // Return if there was a navigation, useful to avoid double tap on two events
+        if (findNavController().currentDestination?.label != "fragment_favorites")
+            return
+        act.vibrate()
+        // Cast required to obtain the original event result from the event item wrapper
+        val event = adapter.getItem(position)
+
+        // Navigate to the new fragment passing in the event with safe args
+        val action =
+            FavoritesFragmentDirections.actionNavigationFavoritesToDetailsFragment(event, position)
+        findNavController().navigate(action)
     }
 
     // Remove the placeholder or return if the placeholder was already removed before
     private fun removePlaceholder() {
-        val placeholder: TextView = requireView().findViewById(R.id.noFavorites) ?: return
+        val placeholder = binding.noFavorites
         placeholder.visibility = View.GONE
+    }
+
+    // Restore the placeholder
+    private fun restorePlaceholder() {
+        val placeholder = binding.noFavorites
+        placeholder.visibility = View.VISIBLE
     }
 
     // Show a bottom sheet containing the stats
     private fun showStatsSheet() {
         act.vibrate()
-        val dialog =
-            MaterialDialog(requireContext(), BottomSheet(LayoutMode.WRAP_CONTENT)).show {
-                cornerRadius(res = R.dimen.rounded_corners)
-                title(R.string.stats_summary)
-                icon(R.drawable.ic_stats_24dp)
-                // Don't use scrollable here, instead use a nestedScrollView in the layout
-                customView(R.layout.dialog_stats)
-            }
-        val customView = dialog.getCustomView()
-        customView.fullStats.text = fullStats
-        // Display the total number of birthdays, start the animated drawable
-        customView.eventCounter.text = totalEvents.toString()
-        val backgroundDrawable = customView.eventCounterBackground
-        // Link the opacity of the background to the number of events (min = 0.05 / max = 100)
-        backgroundDrawable.alpha = min(0.01F * totalEvents + 0.05F, 1.0F)
-        backgroundDrawable.applyLoopingAnimatedVectorDrawable(R.drawable.animated_counter_background)
-        // Show an explanation for the counter, even if it's quite obvious
-        backgroundDrawable.setOnClickListener {
-            act.vibrate()
-            Toast.makeText(
-                requireContext(),
-                resources.getQuantityString(R.plurals.stats_total, totalEvents, totalEvents),
-                Toast.LENGTH_SHORT
-            ).show()
+        if (fullStats == null) {
+            act.showSnackbar(getString(R.string.no_stats))
+            return
         }
-    }
-
-    // Use the generator to generate a random stat and display it
-    private fun generateStat(events: List<EventResult>) {
-        val cardSubtitle: TextView = requireView().findViewById(R.id.statsSubtitle)
-        val cardDescription: TextView = requireView().findViewById(R.id.statsDescription)
-        val generator = StatsGenerator(events, context)
-        cardSubtitle.text = generator.generateRandomStat()
-        fullStats = generator.generateFullStats()
-        val summary = resources.getQuantityString(R.plurals.stats_total, events.size, events.size)
-        cardDescription.text = summary
-    }
-
-    // Loop the animated vector drawable
-    internal fun ImageView.applyLoopingAnimatedVectorDrawable(@DrawableRes animatedVector: Int) {
-        val animated = AnimatedVectorDrawableCompat.create(context, animatedVector)
-        animated?.registerAnimationCallback(object : Animatable2Compat.AnimationCallback() {
-            override fun onAnimationEnd(drawable: Drawable?) {
-                this@applyLoopingAnimatedVectorDrawable.post { animated.start() }
-            }
-        })
-        this.setImageDrawable(animated)
-        animated?.start()
+        // Prevent double dialogs in a stupid yet effective way
+        for (fragment in act.supportFragmentManager.fragments) {
+            if (fragment is StatsBottomSheet)
+                return
+        }
+        val bottomSheet = StatsBottomSheet(act, totalEvents, fullStats!!)
+        if (bottomSheet.isAdded) return
+        bottomSheet.show(act.supportFragmentManager, "stats_bottom_sheet")
     }
 }

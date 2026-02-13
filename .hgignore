@@ -14,7 +14,9 @@ syntax:glob
 ### Android ###
 # Built application files
 *.apk
+*.aab
 *.ap_
+output-metadata.json
 
 # Files for the ART/Dalvik VM
 *.dex

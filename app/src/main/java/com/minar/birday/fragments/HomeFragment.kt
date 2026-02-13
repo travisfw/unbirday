@@ -1,118 +1,243 @@
 package com.minar.birday.fragments
 
-import android.app.PendingIntent
-import android.appwidget.AppWidgetManager
-import android.content.ComponentName
-import android.content.Context
-import android.content.Intent
+import android.animation.ObjectAnimator
 import android.content.SharedPreferences
-import android.graphics.drawable.Drawable
-import android.net.Uri
+import android.content.res.Configuration
+import android.os.Build
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
-import android.provider.Telephony
-import android.text.Editable
-import android.text.TextWatcher
+import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
+import android.view.View.OVER_SCROLL_ALWAYS
+import android.view.View.OnClickListener
 import android.view.ViewGroup
-import android.widget.*
-import androidx.annotation.DrawableRes
-import androidx.core.app.ShareCompat
+import android.widget.ImageView
+import android.widget.TextView
+import androidx.core.animation.doOnEnd
 import androidx.core.content.ContextCompat
+import androidx.core.view.doOnPreDraw
 import androidx.core.widget.addTextChangedListener
 import androidx.fragment.app.Fragment
-import androidx.lifecycle.ViewModelProvider
+import androidx.fragment.app.activityViewModels
+import androidx.interpolator.view.animation.LinearOutSlowInInterpolator
+import androidx.navigation.fragment.FragmentNavigator
+import androidx.navigation.fragment.FragmentNavigatorExtras
+import androidx.navigation.fragment.findNavController
 import androidx.preference.PreferenceManager
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
-import androidx.vectordrawable.graphics.drawable.Animatable2Compat
-import androidx.vectordrawable.graphics.drawable.AnimatedVectorDrawableCompat
-import com.afollestad.materialdialogs.LayoutMode
-import com.afollestad.materialdialogs.MaterialDialog
-import com.afollestad.materialdialogs.WhichButton
-import com.afollestad.materialdialogs.actions.getActionButton
-import com.afollestad.materialdialogs.bottomsheets.BottomSheet
-import com.afollestad.materialdialogs.customview.customView
-import com.afollestad.materialdialogs.customview.getCustomView
-import com.afollestad.materialdialogs.datetime.datePicker
-import com.facebook.shimmer.ShimmerFrameLayout
-import com.google.android.material.switchmaterial.SwitchMaterial
 import com.minar.birday.R
 import com.minar.birday.activities.MainActivity
-import com.minar.birday.activities.SplashActivity
 import com.minar.birday.adapters.EventAdapter
-import com.minar.birday.listeners.OnItemClickListener
-import com.minar.birday.model.Event
+import com.minar.birday.animators.BirdayRecyclerAnimator
+import com.minar.birday.databinding.FragmentHomeBinding
+import com.minar.birday.fragments.dialogs.QuickAppsBottomSheet
+import com.minar.birday.model.EventCode
+import com.minar.birday.model.EventDataItem
 import com.minar.birday.model.EventResult
-import com.minar.birday.utilities.*
+import com.minar.birday.utilities.addInsetsByPadding
+import com.minar.birday.utilities.formatDaysRemaining
+import com.minar.birday.utilities.formatName
+import com.minar.birday.utilities.getNextYears
+import com.minar.birday.utilities.getRemainingDays
+import com.minar.birday.utilities.getThemeColor
+import com.minar.birday.utilities.nextDateFormatted
+import com.minar.birday.utilities.resultToEvent
 import com.minar.birday.viewmodels.MainViewModel
-import com.minar.birday.widgets.EventWidget
-import kotlinx.android.synthetic.main.dialog_apps_event.view.*
-import kotlinx.android.synthetic.main.dialog_details_event.view.*
-import kotlinx.android.synthetic.main.dialog_insert_event.view.*
-import kotlinx.android.synthetic.main.fragment_home.view.*
-import java.time.LocalDate
+import nl.dionsegijn.konfetti.models.Shape
+import nl.dionsegijn.konfetti.models.Size
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.time.temporal.ChronoUnit
-import java.util.*
+import androidx.core.content.edit
 
 
 class HomeFragment : Fragment() {
-    private lateinit var rootView: View
-    private lateinit var recyclerView: RecyclerView
-    private lateinit var mainViewModel: MainViewModel
-    lateinit var adapter: EventAdapter
+    private val mainViewModel: MainViewModel by activityViewModels()
+    private lateinit var adapter: EventAdapter
     lateinit var act: MainActivity
     lateinit var sharedPrefs: SharedPreferences
+    private val emptyString = ""
+    private var _binding: FragmentHomeBinding? = null
+    private val binding get() = _binding!!
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        adapter = EventAdapter(this)
+        adapter = EventAdapter(
+            updateFavorite = { eventResult -> updateFavorite(eventResult) },
+            showFavoriteHint = { showFavoriteHint() },
+            onItemClick = { position -> onItemClick(position) },
+            onItemLongClick = { position -> onItemLongClick(position) }
+        )
         act = activity as MainActivity
         sharedPrefs = PreferenceManager.getDefaultSharedPreferences(requireContext())
     }
 
-    @ExperimentalStdlibApi
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        // Check the orientation of the screen, minimize the card on landscape
+        if (newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE) {
+            binding.root.progress = 1F
+        } else if (newConfig.orientation == Configuration.ORIENTATION_PORTRAIT) {
+            binding.root.progress = sharedPrefs.getFloat("home_motion_state", 0.0F)
+        }
+    }
+
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
         savedInstanceState: Bundle?
     ): View {
-        val v: View = inflater.inflate(R.layout.fragment_home, container, false)
-        val upcomingImage = v.findViewById<ImageView>(R.id.upcomingImage)
-        val shimmer = v.findViewById<ShimmerFrameLayout>(R.id.homeCardShimmer)
+        _binding = FragmentHomeBinding.inflate(inflater, container, false)
+        return binding.root
+    }
+
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+        postponeEnterTransition()
+
+        val upcomingImage = binding.upcomingImage
+        val shimmer = binding.homeCardShimmer
         val shimmerEnabled = sharedPrefs.getBoolean("shimmer", false)
-        val homeMotionLayout = v.homeMain
-        val homeCard = v.homeCard
-        val homeMiniFab = v.homeMiniFab
+        val homeMotionLayout = binding.homeMain
+        val homeCard = binding.homeCard
+        val homeMiniFab = binding.homeMiniFab
+        val typeSelector = binding.homeTypeSelector
+        val searchBar = binding.homeSearch
+        val searchBarLayout = binding.homeSearchLayout
+        val recycler = binding.eventRecycler
+        val orderAlphabetically = sharedPrefs.getBoolean("order_alphabetically", false)
+        val surnameFirst = sharedPrefs.getBoolean("surname_first", false)
         if (shimmerEnabled) shimmer.startShimmer()
-        upcomingImage.applyLoopingAnimatedVectorDrawable(R.drawable.animated_party_popper)
+
+        // Add insets
+        recycler.addInsetsByPadding(bottom = true)
 
         // Setup the search bar
-        v.findViewById<EditText>(R.id.homeSearch).addTextChangedListener { text ->
-            mainViewModel.searchNameChanged(text.toString())
+        typeSelector.scaleX = 0F
+        val listener = OnClickListener {
+            if (searchBar.text.isNullOrBlank()) {
+                searchBarLayout.setEndIconOnClickListener { return@setEndIconOnClickListener }
+                typeSelector.visibility = View.VISIBLE
+                typeSelector.pivotX = searchBarLayout.measuredWidth.toFloat() * 0.95F
+                ObjectAnimator.ofFloat(typeSelector, "scaleX", 1.0f).apply {
+                    duration = 300
+                    interpolator = LinearOutSlowInInterpolator()
+                    start()
+                }
+            } else {
+                searchBar.setText(emptyString)
+            }
+        }
+        searchBarLayout.setEndIconOnClickListener(listener)
+        searchBar.addTextChangedListener { text ->
+            mainViewModel.searchStringChanged(text.toString())
+            if (text.isNullOrBlank()) searchBarLayout.setEndIconDrawable(R.drawable.ic_arrow_left_24dp)
+            else searchBarLayout.setEndIconDrawable(R.drawable.ic_clear_24dp)
+        }
+
+        // Setup the toggle buttons
+        typeSelector.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            when (checkedId) {
+                R.id.homeTypeSelectorBirthday -> {
+                    // Only display events of type birthday
+                    if (isChecked) {
+                        mainViewModel.eventTypeChanged(EventCode.BIRTHDAY.name)
+                    }
+                    if (!isChecked && typeSelector.checkedButtonId == View.NO_ID)
+                        mainViewModel.eventTypeChanged("")
+                }
+
+                R.id.homeTypeSelectorAnniversary -> {
+                    // Only display events of type anniversary
+                    if (isChecked) {
+                        mainViewModel.eventTypeChanged(EventCode.ANNIVERSARY.name)
+                    }
+                    if (!isChecked && typeSelector.checkedButtonId == View.NO_ID)
+                        mainViewModel.eventTypeChanged("")
+                }
+
+                R.id.homeTypeSelectorDeathAnniversary -> {
+                    // Only display events of type death anniversary
+                    if (isChecked) {
+                        mainViewModel.eventTypeChanged(EventCode.DEATH.name)
+                    }
+                    if (!isChecked && typeSelector.checkedButtonId == View.NO_ID)
+                        mainViewModel.eventTypeChanged("")
+                }
+
+                R.id.homeTypeSelectorNameDay -> {
+                    // Only display events of type name day
+                    if (isChecked) {
+                        mainViewModel.eventTypeChanged(EventCode.NAME_DAY.name)
+                    }
+                    if (!isChecked && typeSelector.checkedButtonId == View.NO_ID)
+                        mainViewModel.eventTypeChanged("")
+                }
+
+                R.id.homeTypeSelectorOther -> {
+                    // Only display events of type other
+                    if (isChecked) {
+                        mainViewModel.eventTypeChanged(EventCode.OTHER.name)
+                    }
+                    if (!isChecked && typeSelector.checkedButtonId == View.NO_ID)
+                        mainViewModel.eventTypeChanged("")
+                }
+
+                R.id.homeTypeSelectorClose -> {
+                    typeSelector.pivotX = searchBarLayout.measuredWidth.toFloat() * 0.95F
+                    ObjectAnimator.ofFloat(typeSelector, "scaleX", 0.0f).apply {
+                        duration = 250
+                        interpolator = LinearOutSlowInInterpolator()
+                        start()
+                    }.doOnEnd {
+                        typeSelector.visibility = View.GONE
+                        typeSelector.clearChecked()
+                        mainViewModel.eventTypeChanged("")
+                        searchBarLayout.setEndIconOnClickListener(listener)
+                    }
+                }
+            }
+        }
+        binding.homeTypeSelectorClose.setOnLongClickListener {
+            typeSelector.clearChecked()
+            mainViewModel.eventTypeChanged("")
+            true
         }
 
         // Set motion layout state, since it's saved
         homeMotionLayout.progress = sharedPrefs.getFloat("home_motion_state", 0.0F)
 
+        // Set type selector visibility and selection
+        if (!mainViewModel.selectedType.value.isNullOrBlank()) {
+            typeSelector.scaleX = 1F
+            typeSelector.visibility = View.VISIBLE
+            when (mainViewModel.selectedType.value) {
+                EventCode.BIRTHDAY.name -> typeSelector.check(R.id.homeTypeSelectorBirthday)
+                EventCode.ANNIVERSARY.name -> typeSelector.check(R.id.homeTypeSelectorAnniversary)
+                EventCode.DEATH.name -> typeSelector.check(R.id.homeTypeSelectorDeathAnniversary)
+                EventCode.NAME_DAY.name -> typeSelector.check(R.id.homeTypeSelectorNameDay)
+                EventCode.OTHER.name -> typeSelector.check(R.id.homeTypeSelectorOther)
+            }
+        }
+
         // Vibration on the mini fab (with manual managing of the transition)
         homeMiniFab.setOnClickListener {
+            act.vibrate()
             when (homeMotionLayout.progress) {
                 0.0F -> {
-                    act.vibrate()
                     homeMotionLayout.transitionToEnd()
-                    sharedPrefs.edit().putFloat("home_motion_state", 1.0F).apply()
+                    sharedPrefs.edit { putFloat("home_motion_state", 1.0F) }
                 }
+
                 1.0F -> {
-                    act.vibrate()
                     homeMotionLayout.transitionToStart()
-                    sharedPrefs.edit().putFloat("home_motion_state", 0.0F).apply()
+                    sharedPrefs.edit { putFloat("home_motion_state", 0.0F) }
                 }
             }
+        }
+
+        // Activate the overscroll effect on Android 12 and above
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            recycler.overScrollMode = OVER_SCROLL_ALWAYS
         }
 
         // Show quick apps on long press too
@@ -125,534 +250,311 @@ class HomeFragment : Fragment() {
         homeCard.setOnClickListener {
             showQuickAppsSheet()
         }
-        rootView = v
 
         // Setup the recycler view
-        initializeRecyclerView()
-        setUpAdapter()
+        recycler.adapter = adapter
 
-        mainViewModel = ViewModelProvider(this).get(MainViewModel::class.java)
-        mainViewModel.allEvents.observe(viewLifecycleOwner, { events ->
+        // The events, ordered and filtered by the eventual search
+        mainViewModel.allEvents.observe(viewLifecycleOwner)
+        { events ->
             // Manage placeholders, search results and the main list
-            events?.let { adapter.submitList(it) }
+            Log.d("events", "Events changed, actual size: ${events.size}")
+
+            // Quickly delete search result TODO Only available in experimental settings
+            if (sharedPrefs.getBoolean("delete_search", false)) {
+                if (events.isNotEmpty() &&
+                    (!mainViewModel.searchString.value.isNullOrBlank() ||
+                            !mainViewModel.selectedType.value.isNullOrBlank())
+                ) {
+                    Log.d("events", "Showing the delete fab")
+                    act.toggleDeleteFab(true)
+                } else {
+                    Log.d("events", "Hiding the delete fab")
+                    act.toggleDeleteFab(false)
+                }
+            }
+
             if (events.isNotEmpty()) {
+                adapter.prepareAndSubmitList(events, orderAlphabetically, surnameFirst)
+                // Insert the events in the upper card and remove the placeholders
                 insertUpcomingEvents(events)
                 removePlaceholder()
+            } else {
+                adapter.submitList(listOf())
+                // Avd for empty card (same avd for no results or no events atm)
+                act.animateAvd(upcomingImage, R.drawable.animated_no_results)
+                when {
+                    mainViewModel.searchString.value!!.isNotBlank() -> restorePlaceholders(true)
+                    mainViewModel.selectedType.value!!.isNotBlank() -> restorePlaceholders(true)
+                    mainViewModel.searchString.value.isNullOrBlank() -> restorePlaceholders()
+                    else -> removePlaceholder()
+                }
             }
-            if (events.isEmpty()) restorePlaceholders()
-            if (events.isEmpty() && mainViewModel.searchStringLiveData.value!!.isNotBlank())
-                restorePlaceholders(true)
-        })
-        mainViewModel.nextEvents.observe(viewLifecycleOwner, { nextEvents ->
-            // Update the widgets using the next events, to avoid strange behaviors when searching
-            updateWidget(nextEvents)
-        })
+            recycler.doOnPreDraw {
+                startPostponedEnterTransition()
+            }.also {
+                if (events.isEmpty()) recycler.visibility = View.GONE
+                else {
+                    recycler.visibility = View.VISIBLE
+                    recycler.itemAnimator = BirdayRecyclerAnimator()
+                }
+            }
+        }
 
-        return v
+        // Restore search string in the search bar
+        if (mainViewModel.searchString.value!!.isNotBlank())
+            searchBar.setText(mainViewModel.searchString.value)
     }
 
-    // Initialize the necessary parts of the recycler view
-    private fun initializeRecyclerView() {
-        recyclerView = rootView.findViewById(R.id.eventRecycler)
-        recyclerView.layoutManager = LinearLayoutManager(activity)
-        recyclerView.adapter = adapter
+    override fun onPause() {
+        super.onPause()
+        act.toggleDeleteFab(false)
     }
 
-    // Manage the onclick actions, or the long click (unused atm)
-    @ExperimentalStdlibApi
-    private fun setUpAdapter() {
-        adapter.setOnItemClickListener(onItemClickListener = object : OnItemClickListener {
-            // Show a dialog with the details of the selected contact
-            override fun onItemClick(position: Int, view: View?) {
-                act.vibrate()
-                val event = adapter.getItem(position)
-                val title = getString(R.string.event_details) + " - " + event.name
-                val dialog = MaterialDialog(act).show {
-                    title(text = title)
-                    icon(R.drawable.ic_balloon_24dp)
-                    cornerRadius(res = R.dimen.rounded_corners)
-                    customView(R.layout.dialog_details_event, scrollable = true)
-                    negativeButton(R.string.cancel) {
-                        dismiss()
-                    }
-                }
-                // Setup listeners and texts
-                val customView = dialog.getCustomView()
-                val deleteButton = customView.detailsDeleteButton
-                val editButton = customView.detailsEditButton
-                val shareButton = customView.detailsShareButton
+    override fun onDestroyView() {
+        super.onDestroyView()
+        // Reset each binding to null to follow the best practice
+        _binding = null
+    }
 
-                deleteButton.setOnClickListener {
-                    act.vibrate()
-                    deleteEvent(adapter.getItem(position))
-                    dialog.dismiss()
-                }
+    // Functions to update, delete and create an Event object to pass instead of the returning object passed
+    private fun updateFavorite(eventResult: EventResult) {
+        mainViewModel.update(resultToEvent(eventResult))
+    }
 
-                editButton.setOnClickListener {
-                    act.vibrate()
-                    editEvent(adapter.getItem(position))
-                    dialog.dismiss()
-                }
+    // Show an hint when the star is long pressed
+    private fun showFavoriteHint() {
+        act.vibrate()
+        act.showSnackbar(getString(R.string.add_favorite))
+    }
 
-                shareButton.setOnClickListener {
-                    act.vibrate()
-                    shareEvent(adapter.getItem(position))
-                    dialog.dismiss()
-                }
+    // Show a dialog with the details of the selected contact
+    private fun onItemClick(position: Int) {
+        // Return if there was a navigation, useful to avoid double tap on two events
+        if (findNavController().currentDestination?.label != "fragment_home")
+            return
+        act.vibrate()
+        // Cast required to obtain the original event result from the event item wrapper
+        val event = (adapter.getItem(position) as EventDataItem.EventItem).eventResult
+        val viewHolder: EventAdapter.EventViewHolder =
+            binding.eventRecycler.findViewHolderForAdapterPosition(position) as EventAdapter.EventViewHolder
+        // If the view is null or doesn't exist, nothing will happen
+        val fullView = viewHolder.itemView
+        val image = fullView.findViewById<ImageView>(R.id.eventImage)
 
-                val formatter: DateTimeFormatter =
-                    DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL)
-                val subject: MutableList<EventResult> = mutableListOf()
-                subject.add(event)
-                val statsGenerator = StatsGenerator(subject, context)
-                val daysCountdown =
-                    daysRemaining(getRemainingDays(event.nextDate!!), requireContext())
-                customView.detailsZodiacSignValue.text = statsGenerator.getZodiacSign(event)
-                customView.detailsCountdown.text = daysCountdown
+        // Navigate to the new fragment passing in the event with safe args
+        val action = HomeFragmentDirections.actionNavigationMainToDetailsFragment(event, position)
 
-                // Hide the age and the chinese sign and use a shorter birth date if the year is unknown
-                if (!event.yearMatter!!) {
-                    customView.detailsNextAge.visibility = View.GONE
-                    customView.detailsNextAgeValue.visibility = View.GONE
-                    customView.detailsChineseSign.visibility = View.GONE
-                    customView.detailsChineseSignValue.visibility = View.GONE
-                    val reducedBirthDate = getReducedDate(event.originalDate)
-                    customView.detailsBirthDateValue.text = reducedBirthDate
-                } else {
-                    customView.detailsNextAgeValue.text = getNextAge(event).toString()
-                    customView.detailsBirthDateValue.text = event.originalDate.format(formatter)
-                    customView.detailsChineseSignValue.text = statsGenerator.getChineseSign(event)
-                }
-                // Set the drawable of the zodiac sign
-                when (statsGenerator.getZodiacSignNumber(event)) {
-                    0 -> customView.detailsZodiacImage.setImageDrawable(
-                        ContextCompat.getDrawable(
-                            requireContext(), R.drawable.ic_zodiac_sagittarius
-                        )
-                    )
-                    1 -> customView.detailsZodiacImage.setImageDrawable(
-                        ContextCompat.getDrawable(
-                            requireContext(), R.drawable.ic_zodiac_capricorn
-                        )
-                    )
-                    2 -> customView.detailsZodiacImage.setImageDrawable(
-                        ContextCompat.getDrawable(
-                            requireContext(), R.drawable.ic_zodiac_aquarius
-                        )
-                    )
-                    3 -> customView.detailsZodiacImage.setImageDrawable(
-                        ContextCompat.getDrawable(
-                            requireContext(), R.drawable.ic_zodiac_pisces
-                        )
-                    )
-                    4 -> customView.detailsZodiacImage.setImageDrawable(
-                        ContextCompat.getDrawable(
-                            requireContext(), R.drawable.ic_zodiac_aries
-                        )
-                    )
-                    5 -> customView.detailsZodiacImage.setImageDrawable(
-                        ContextCompat.getDrawable(
-                            requireContext(), R.drawable.ic_zodiac_taurus
-                        )
-                    )
-                    6 -> customView.detailsZodiacImage.setImageDrawable(
-                        ContextCompat.getDrawable(
-                            requireContext(), R.drawable.ic_zodiac_gemini
-                        )
-                    )
-                    7 -> customView.detailsZodiacImage.setImageDrawable(
-                        ContextCompat.getDrawable(
-                            requireContext(), R.drawable.ic_zodiac_cancer
-                        )
-                    )
-                    8 -> customView.detailsZodiacImage.setImageDrawable(
-                        ContextCompat.getDrawable(
-                            requireContext(), R.drawable.ic_zodiac_leo
-                        )
-                    )
-                    9 -> customView.detailsZodiacImage.setImageDrawable(
-                        ContextCompat.getDrawable(
-                            requireContext(), R.drawable.ic_zodiac_virgo
-                        )
-                    )
-                    10 -> customView.detailsZodiacImage.setImageDrawable(
-                        ContextCompat.getDrawable(
-                            requireContext(), R.drawable.ic_zodiac_libra
-                        )
-                    )
-                    11 -> customView.detailsZodiacImage.setImageDrawable(
-                        ContextCompat.getDrawable(
-                            requireContext(), R.drawable.ic_zodiac_scorpio
-                        )
-                    )
-                }
-            }
+        // Play a different transition depending on the presence of the images
+        val extras: FragmentNavigator.Extras = if (sharedPrefs.getBoolean("hide_images", false)) {
+            FragmentNavigatorExtras(fullView to "shared_full_view$position")
+        } else {
+            FragmentNavigatorExtras(image to "shared_image$position")
+        }
+        findNavController().navigate(action, extras)
+    }
 
-            // TODO reassign an action to the long press
-            override fun onItemLongClick(position: Int, view: View?): Boolean {
-                return true
-            }
-        })
+    // Show the next age and countdown on long press (only the latter for no year events)
+    private fun onItemLongClick(position: Int) {
+        act.vibrate()
+        val event = (adapter.getItem(position) as EventDataItem.EventItem).eventResult
+        val quickStat =
+            formatDaysRemaining(
+                getRemainingDays(event.nextDate!!),
+                requireContext()
+            )
+        act.showSnackbar(quickStat, action = fun() {
+            mainViewModel.delete(resultToEvent(event))
+            act.showSnackbar(
+                requireContext().getString(R.string.deleted),
+                actionText = requireContext().getString(R.string.cancel),
+                action = fun() = act.insertBack(event),
+            )
+        }, actionText = getString(R.string.delete_event))
     }
 
     // Remove the placeholder or return if the placeholder was already removed before
     private fun removePlaceholder() {
-        val placeholder: TextView = requireView().findViewById(R.id.noEvents) ?: return
+        val placeholder = binding.noEvents
         placeholder.visibility = View.GONE
     }
 
     // Restore the placeholder and texts when there are no events. If search is true, show the "no result" placeholder
-    private fun restorePlaceholders(search: Boolean = false) {
-        val cardTitle: TextView = requireView().findViewById(R.id.upcomingTitle)
-        val cardSubtitle: TextView = requireView().findViewById(R.id.upcomingSubtitle)
-        val cardDescription: TextView = requireView().findViewById(R.id.upcomingDescription)
-        val placeholder: TextView = requireView().findViewById(R.id.noEvents)
+    private fun restorePlaceholders(search: Boolean = false, cardOnly: Boolean = false) {
+        val cardTitle: TextView = binding.upcomingTitle
+        val cardSubtitle: TextView = binding.upcomingSubtitle
+        val cardDescription: TextView = binding.upcomingDescription
+        val placeholder: TextView = binding.noEvents
         if (!search) {
             cardTitle.text = getString(R.string.next_event)
             cardSubtitle.text = getString(R.string.no_next_event)
             cardDescription.text = getString(R.string.no_next_event_description)
         } else {
             cardTitle.text = getString(R.string.search_no_result_title)
-            cardSubtitle.text = ""
+            cardSubtitle.text = emptyString
             cardDescription.text = getString(R.string.search_no_result_description)
             placeholder.text = getString(R.string.search_no_result_title)
         }
-        placeholder.visibility = View.VISIBLE
+        if (!cardOnly) placeholder.visibility = View.VISIBLE
     }
 
-    // Update the existing widgets with the newest data and the onclick action
-    private fun updateWidget(events: List<EventResult>) {
-        val appWidgetManager = AppWidgetManager.getInstance(context)
-        val remoteViews = if (sharedPrefs.getBoolean("dark_widget", false)) RemoteViews(
-            requireContext().packageName,
-            R.layout.event_widget_dark
-        )
-        else RemoteViews(requireContext().packageName, R.layout.event_widget_light)
-        val thisWidget = context?.let { ComponentName(it, EventWidget::class.java) }
-        val intent = Intent(context, SplashActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(context, 0, intent, 0)
-        val formatter: DateTimeFormatter = DateTimeFormatter.ofLocalizedDate(FormatStyle.LONG)
-
-        // Make sure to show if there's more than one event
-        val widgetUpcoming = when {
-            // No events
-            events.isEmpty() -> requireContext().getString(R.string.no_next_event)
-            // Two events
-            events.size == 2 && events[0].nextDate!!.isEqual(events[1].nextDate) ->
-                events[0].name + " " + requireContext().getString(R.string.and) +
-                        " " + events[1].name + ", " + nextDateFormatted(
-                    events[0],
-                    formatter,
-                    requireContext()
-                )
-            events.size > 2 && events[0].nextDate!!.isEqual(events[1].nextDate) &&
-                    !events[1].nextDate!!.isEqual(events[2].nextDate) ->
-                events[0].name + " " + requireContext().getString(R.string.and) +
-                        " " + events[1].name + ", " + nextDateFormatted(
-                    events[0],
-                    formatter,
-                    requireContext()
-                )
-            // More than two events
-            events.size > 2 && events[0].nextDate!!.isEqual(events[1].nextDate) &&
-                    events[1].nextDate!!.isEqual(events[2].nextDate) ->
-                events[0].name + " " + requireContext().getString(R.string.event_others) +
-                        ", " + nextDateFormatted(events[0], formatter, requireContext())
-            // One event
-            else -> events[0].name + ", " + nextDateFormatted(
-                events[0],
-                formatter,
-                requireContext()
-            )
-        }
-
-        remoteViews.setOnClickPendingIntent(R.id.event_widget_main, pendingIntent)
-        remoteViews.setTextViewText(R.id.event_widget_text, widgetUpcoming)
-        appWidgetManager.updateAppWidget(thisWidget, remoteViews)
-    }
-
-    // Insert the necessary information in the upcoming event cardview
+    // Insert the necessary information in the upcoming event card view (and confetti)
     private fun insertUpcomingEvents(events: List<EventResult>) {
-        val cardTitle: TextView = requireView().upcomingTitle
-        val cardSubtitle: TextView = requireView().upcomingSubtitle
-        val cardDescription: TextView = requireView().upcomingDescription
+        // First thing first, get the next events
+        val nextEvents: List<EventResult> =
+            if (events.indexOfFirst { it.nextDate != events[0].nextDate } == -1) events else
+                events.subList(0, events.indexOfFirst { it.nextDate != events[0].nextDate })
+
+        val cardTitle = binding.upcomingTitle
+        val cardSubtitle = binding.upcomingSubtitle
+        val cardDescription = binding.upcomingDescription
+        val upcomingImage = binding.upcomingImage
         var personName = ""
         var nextDateText = ""
         var nextAge = ""
-        val upcomingDate = events[0].nextDate
+        val upcomingDate = nextEvents[0].nextDate
         val formatter: DateTimeFormatter = DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL)
 
+        // Set the correct avd
+        when {
+            nextEvents.all { it.type == EventCode.DEATH.name } -> act.animateAvd(
+                upcomingImage,
+                R.drawable.animated_death_anniversary, 1000
+            )
+
+            nextEvents.all { it.type == EventCode.ANNIVERSARY.name } -> act.animateAvd(
+                upcomingImage,
+                R.drawable.animated_anniversary, 1000
+            )
+
+            nextEvents.all { it.type == EventCode.NAME_DAY.name } -> act.animateAvd(
+                upcomingImage,
+                R.drawable.animated_name_day, 1000
+            )
+
+            nextEvents.all { it.type == EventCode.OTHER.name } -> act.animateAvd(
+                upcomingImage,
+                R.drawable.animated_other, 1000
+            )
+
+            else -> act.animateAvd(
+                upcomingImage,
+                R.drawable.animated_party_popper,
+                1000
+            )
+        }
+
+        // Remove events in the future today (eg: now is december 1st 2023, an event has original date = december 1st 2050)
+        var filteredNextEvents = nextEvents.toMutableList()
+        filteredNextEvents.removeIf { getNextYears(it) == 0 }
+        // If the events are all in the future, display them but avoid confetti
+        if (filteredNextEvents.isEmpty()) {
+            filteredNextEvents = nextEvents.toMutableList()
+            mainViewModel.confettiDone = true
+        }
+
+        // Trigger confetti if there's an event today, except for "only death anniversaries" days
+        if (
+            getRemainingDays(upcomingDate!!) == 0 &&
+            !mainViewModel.confettiDone &&
+            !nextEvents.all { it.type == EventCode.DEATH.name }
+        ) {
+            triggerConfetti()
+            mainViewModel.confettiDone = true
+        }
+
         // Manage multiple events in the same day considering first case, middle cases and last case if more than 3
-        for (event in events) {
-            if (event.nextDate!!.isEqual(upcomingDate)) {
-                // Consider the case of null surname and the case of unknown age
-                val formattedPersonName =
-                    formatName(event, sharedPrefs.getBoolean("surname_first", false))
-                val age = if (event.yearMatter!!) event.nextDate.year.minus(event.originalDate.year)
-                    .toString()
-                else getString(R.string.unknown_age)
-                when (events.indexOf(event)) {
-                    0 -> {
-                        personName = formattedPersonName
-                        nextDateText = nextDateFormatted(event, formatter, requireContext())
-                        nextAge = getString(R.string.next_age_years) + ": $age"
-                    }
-                    1, 2 -> {
-                        personName += ", $formattedPersonName"
-                        nextAge += ", $age"
-                    }
-                    3 -> {
-                        personName += " " + getString(R.string.event_others)
-                        nextAge += "..."
-                    }
+        for (event in filteredNextEvents) {
+            // Consider the case of null surname and the case of unknown age
+            val formattedPersonName =
+                formatName(event, sharedPrefs.getBoolean("surname_first", false))
+
+            val age = if (event.yearMatter!! && event.type != EventCode.NAME_DAY.name)
+                getNextYears(event)
+            else if (event.type == EventCode.NAME_DAY.name) getString(R.string.name_day)
+            else getString(R.string.unknown)
+            // Don't use the function in EventUtils since this assigns all the variables at once
+            when (nextEvents.indexOf(event)) {
+                0 -> {
+                    personName = formattedPersonName
+                    nextDateText = nextDateFormatted(event, formatter, requireContext())
+                    nextAge = getString(R.string.next_age_years) + ": $age"
+                }
+
+                1, 2 -> {
+                    personName += ", $formattedPersonName"
+                    nextAge += ", $age"
+                }
+
+                3 -> {
+                    personName += " " + getString(R.string.event_others)
+                    nextAge += "..."
                 }
             }
             if (ChronoUnit.DAYS.between(event.nextDate, upcomingDate) < 0) break
-
         }
-
         cardTitle.text = personName
         cardSubtitle.text = nextDateText
         cardDescription.text = nextAge
     }
 
-    // Functions to update, delete and create an Event object to pass instead of the returning object passed
-    fun updateFavorite(eventResult: EventResult) = mainViewModel.update(resultToEvent(eventResult))
-
-    fun deleteEvent(eventResult: EventResult) = mainViewModel.delete(resultToEvent(eventResult))
-
-    @ExperimentalStdlibApi
-    private fun editEvent(eventResult: EventResult) {
-        var nameValue = eventResult.name
-        var surnameValue = eventResult.surname
-        var countYearValue = eventResult.yearMatter
-        var eventDateValue: LocalDate = eventResult.originalDate
-        val dialog = MaterialDialog(act, BottomSheet(LayoutMode.WRAP_CONTENT)).show {
-            cornerRadius(res = R.dimen.rounded_corners)
-            title(R.string.edit_event)
-            icon(R.drawable.ic_edit_24dp)
-            customView(R.layout.dialog_insert_event)
-            positiveButton(R.string.update_event) {
-                // Use the data to create an event object and update the db
-                val tuple = Event(
-                    id = eventResult.id,
-                    originalDate = eventDateValue,
-                    name = nameValue.smartCapitalize(),
-                    yearMatter = countYearValue,
-                    surname = surnameValue?.smartCapitalize(),
-                    favorite = eventResult.favorite,
-                    notes = eventResult.notes,
-                    image = eventResult.image
-                )
-                mainViewModel.update(tuple)
-                dismiss()
-            }
-            negativeButton(R.string.cancel) {
-                dismiss()
-            }
-        }
-
-        // Setup listeners and checks on the fields
-        dialog.getActionButton(WhichButton.POSITIVE).isEnabled = true
-        val customView = dialog.getCustomView()
-        val name = customView.findViewById<TextView>(R.id.nameEvent)
-        val surname = customView.findViewById<TextView>(R.id.surnameEvent)
-        val eventDate = customView.findViewById<TextView>(R.id.dateEvent)
-        val countYear = customView.findViewById<SwitchMaterial>(R.id.countYearSwitch)
-        name.text = nameValue
-        surname.text = surnameValue
-        countYear.isChecked = countYearValue!!
-        val formatter: DateTimeFormatter = DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
-        eventDate.text = eventDateValue.format(formatter)
-        val endDate = Calendar.getInstance()
-        var dateDialog: MaterialDialog? = null
-
-        // To automatically show the last selected date, parse it to another Calendar object
-        val lastDate = Calendar.getInstance()
-        lastDate.set(eventDateValue.year, eventDateValue.monthValue - 1, eventDateValue.dayOfMonth)
-
-        // Update the boolean value on each click
-        countYear.setOnCheckedChangeListener { _, isChecked ->
-            countYearValue = isChecked
-        }
-
-        eventDate.setOnClickListener {
-            // Prevent double dialogs on fast click
-            if (dateDialog == null) {
-                dateDialog = MaterialDialog(act).show {
-                    cancelable(false)
-                    cancelOnTouchOutside(false)
-                    datePicker(maxDate = endDate, currentDate = lastDate) { _, date ->
-                        val year = date.get(Calendar.YEAR)
-                        val month = date.get(Calendar.MONTH) + 1
-                        val day = date.get(Calendar.DAY_OF_MONTH)
-                        eventDateValue = LocalDate.of(year, month, day)
-                        eventDate.text = eventDateValue.format(formatter)
-                        // If ok is pressed, the last selected date is saved if the dialog is reopened
-                        lastDate.set(year, month - 1, day)
-                    }
-                }
-                Handler(Looper.getMainLooper()).postDelayed({ dateDialog = null }, 750)
-            }
-        }
-
-        // Validate each field in the form with the same watcher
-        var nameCorrect = true
-        var surnameCorrect = true
-        val watcher = object : TextWatcher {
-            override fun beforeTextChanged(charSequence: CharSequence, i: Int, i1: Int, i2: Int) {}
-            override fun onTextChanged(charSequence: CharSequence, i: Int, i1: Int, i2: Int) {}
-            override fun afterTextChanged(editable: Editable) {
-                when {
-                    editable === name.editableText -> {
-                        val nameText = name.text.toString()
-                        if (nameText.isBlank() || !checkString(nameText)) {
-                            customView.nameEventLayout.error =
-                                getString(R.string.invalid_value_name)
-                            dialog.getActionButton(WhichButton.POSITIVE).isEnabled = false
-                            nameCorrect = false
-                        } else {
-                            nameValue = nameText
-                            customView.nameEventLayout.error = null
-                            nameCorrect = true
-                        }
-                    }
-                    editable === surname.editableText -> {
-                        val surnameText = surname.text.toString()
-                        if (!checkString(surnameText)) {
-                            customView.surnameEventLayout.error =
-                                getString(R.string.invalid_value_name)
-                            dialog.getActionButton(WhichButton.POSITIVE).isEnabled = false
-                            surnameCorrect = false
-                        } else {
-                            surnameValue = surnameText
-                            customView.surnameEventLayout.error = null
-                            surnameCorrect = true
-                        }
-                    }
-                }
-                if (nameCorrect && surnameCorrect) dialog.getActionButton(WhichButton.POSITIVE).isEnabled =
-                    true
-            }
-        }
-
-        name.addTextChangedListener(watcher)
-        surname.addTextChangedListener(watcher)
-        eventDate.addTextChangedListener(watcher)
-    }
-
     // Show a bottom sheet containing some quick apps
     private fun showQuickAppsSheet() {
         act.vibrate()
-        val dialog =
-            MaterialDialog(requireContext(), BottomSheet(LayoutMode.WRAP_CONTENT)).show {
-                cornerRadius(res = R.dimen.rounded_corners)
-                title(R.string.event_apps)
-                icon(R.drawable.ic_apps_24dp)
-                message(R.string.event_apps_description)
-                customView(R.layout.dialog_apps_event, scrollable = true)
-            }
-
-        val customView = dialog.getCustomView()
-        // Using viewbinding to fetch the buttons
-        val whatsappButton = customView.whatsappButton
-        val dialerButton = customView.dialerButton
-        val messagesButton = customView.messagesButton
-        val telegramButton = customView.telegramButton
-        val ctx: Context = requireContext()
-
-        whatsappButton.setOnClickListener {
-            act.vibrate()
-            try {
-                val whatsIntent: Intent? =
-                    ctx.packageManager.getLaunchIntentForPackage("com.whatsapp")
-                ctx.startActivity(whatsIntent)
-            } catch (e: Exception) {
-                startActivity(
-                    Intent(
-                        Intent.ACTION_VIEW,
-                        Uri.parse("https://play.google.com/store/apps/details?id=com.whatsapp")
-                    )
-                )
-            }
-            dialog.dismiss()
+        // Prevent double dialogs in a stupid yet effective way
+        for (fragment in act.supportFragmentManager.fragments) {
+            if (fragment is QuickAppsBottomSheet)
+                return
         }
-
-        dialerButton.setOnClickListener {
-            act.vibrate()
-            try {
-                val dialIntent = Intent(Intent.ACTION_DIAL)
-                ctx.startActivity(dialIntent)
-            } catch (e: Exception) {
-                Toast.makeText(
-                    ctx,
-                    ctx.getString(R.string.no_default_dialer),
-                    Toast.LENGTH_SHORT
-                ).show()
-            }
-            dialog.dismiss()
-        }
-
-        messagesButton.setOnClickListener {
-            act.vibrate()
-            try {
-                val defaultSmsPackage = Telephony.Sms.getDefaultSmsPackage(requireContext())
-                val smsIntent: Intent? =
-                    ctx.packageManager.getLaunchIntentForPackage(defaultSmsPackage)
-                ctx.startActivity(smsIntent)
-            } catch (e: Exception) {
-                Toast.makeText(ctx, ctx.getString(R.string.no_default_sms), Toast.LENGTH_SHORT)
-                    .show()
-            }
-            dialog.dismiss()
-        }
-
-        telegramButton.setOnClickListener {
-            act.vibrate()
-            try {
-                val telegramIntent: Intent? =
-                    ctx.packageManager.getLaunchIntentForPackage("org.telegram.messenger")
-                ctx.startActivity(telegramIntent)
-            } catch (e: Exception) {
-                startActivity(
-                    Intent(
-                        Intent.ACTION_VIEW,
-                        Uri.parse("https://play.google.com/store/apps/details?id=org.telegram.messenger")
-                    )
-                )
-            }
-            dialog.dismiss()
-        }
+        val bottomSheet = QuickAppsBottomSheet(act)
+        if (bottomSheet.isAdded) return
+        bottomSheet.show(act.supportFragmentManager, "quick_apps_bottom_sheet")
     }
 
-    // Share an event as a plain string (plus some explanatory emotes) on every supported app
-    private fun shareEvent(event: EventResult) {
-        val formatter: DateTimeFormatter = DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL)
-        val eventInformation =
-            String(Character.toChars(0x1F388)) + "  " +
-                    getString(R.string.notification_title) +
-                    "\n" + String(Character.toChars(0x1F973)) + "  " +
-                    formatName(event, sharedPrefs.getBoolean("surname_first", false)) +
-                    "\n" + String(Character.toChars(0x1F4C5)) + "  " +
-                    event.nextDate!!.format(formatter)
-        ShareCompat.IntentBuilder
-            .from(requireActivity())
-            .setText(eventInformation)
-            .setType("text/plain")
-            .setChooserTitle(getString(R.string.share_event))
-            .startChooser()
-    }
-
-    // Loop the animated vector drawable
-    internal fun ImageView.applyLoopingAnimatedVectorDrawable(@DrawableRes animatedVector: Int) {
-        val animated = AnimatedVectorDrawableCompat.create(context, animatedVector)
-        animated?.registerAnimationCallback(object : Animatable2Compat.AnimationCallback() {
-            override fun onAnimationEnd(drawable: Drawable?) {
-                this@applyLoopingAnimatedVectorDrawable.post { animated.start() }
-            }
-        })
-        this.setImageDrawable(animated)
-        animated?.start()
+    // Activate the confetti effect (stream, 3 colors, 4 shapes)
+    private fun triggerConfetti() {
+        val confetti = binding.confettiView
+        confetti.build()
+            .addColors(
+                getThemeColor(R.attr.colorTertiary, act),
+                getThemeColor(R.attr.colorSecondary, act),
+                getThemeColor(R.attr.colorPrimary, act),
+                getThemeColor(R.attr.colorOnSurface, act),
+            )
+            .setDirection(0.0, 359.0)
+            .setSpeed(0.5f, 4f)
+            .setRotationEnabled(true)
+            .setFadeOutEnabled(true)
+            .setTimeToLive(2000L)
+            .addShapes(
+                Shape.DrawableShape(
+                    ContextCompat.getDrawable(
+                        act,
+                        R.drawable.ic_triangle_24dp
+                    )!!
+                ),
+                Shape.DrawableShape(
+                    ContextCompat.getDrawable(
+                        act,
+                        R.drawable.ic_favorites_24dp
+                    )!!
+                ),
+                Shape.DrawableShape(
+                    ContextCompat.getDrawable(
+                        act,
+                        R.drawable.ic_star_24dp
+                    )!!
+                ),
+                Shape.DrawableShape(
+                    ContextCompat.getDrawable(
+                        act,
+                        R.drawable.ic_octagram_24dp
+                    )!!
+                )
+            )
+            .addSizes(Size(8), Size(12), Size(16))
+            .setPosition(-50f, confetti.width + 50f, -50f, -50f)
+            .streamFor(200, 2000L)
     }
 }
 
