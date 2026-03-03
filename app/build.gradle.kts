@@ -8,12 +8,12 @@ plugins {
 }
 
 android {
-    namespace = "com.minar.birday"
+    namespace = "travisfw.unbirday"
     compileSdk = 36
     buildToolsVersion = "35.0.0"
 
     defaultConfig {
-        applicationId = "com.minar.unbirday"
+        applicationId = "travisfw.unbirday"
         targetSdk = 36
         minSdk = 26
         versionCode = 38

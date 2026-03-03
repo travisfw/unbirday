@@ -6,7 +6,7 @@
     app:startDestination="@id/navigationMain">
     <fragment
         android:id="@+id/navigationMain"
-        android:name="com.minar.birday.fragments.HomeFragment"
+        android:name="travisfw.unbirday.fragments.HomeFragment"
         android:label="fragment_home"
         tools:layout="@layout/fragment_home">
         <action
@@ -19,7 +19,7 @@
     </fragment>
     <fragment
         android:id="@+id/navigationFavorites"
-        android:name="com.minar.birday.fragments.FavoritesFragment"
+        android:name="travisfw.unbirday.fragments.FavoritesFragment"
         android:label="fragment_favorites"
         tools:layout="@layout/fragment_favorites">
         <action
@@ -39,7 +39,7 @@
     </fragment>
     <fragment
         android:id="@+id/navigationSettings"
-        android:name="com.minar.birday.fragments.SettingsFragment"
+        android:name="travisfw.unbirday.fragments.SettingsFragment"
         android:label="fragment_settings">
         <action
             android:id="@+id/action_navigationSettings_to_experimentalSettingsFragment"
@@ -51,23 +51,23 @@
     </fragment>
     <fragment
         android:id="@+id/experimentalSettingsFragment"
-        android:name="com.minar.birday.fragments.ExperimentalSettingsFragment"
+        android:name="travisfw.unbirday.fragments.ExperimentalSettingsFragment"
         android:label="fragment_experimental_settings"
         tools:layout="@layout/experimental_disclaimer_row" />
     <fragment
         android:id="@+id/detailsFragment"
-        android:name="com.minar.birday.fragments.DetailsFragment"
+        android:name="travisfw.unbirday.fragments.DetailsFragment"
         android:label="fragment_details"
         tools:layout="@layout/fragment_details">
         <argument
             android:name="event"
-            app:argType="com.minar.birday.model.EventResult" />
+            app:argType="travisfw.unbirday.model.EventResult" />
         <argument
             android:name="position"
             app:argType="integer" />
     </fragment>
     <fragment
         android:id="@+id/overviewFragment"
-        android:name="com.minar.birday.fragments.OverviewFragment"
+        android:name="travisfw.unbirday.fragments.OverviewFragment"
         android:label="fragment_overview" />
 </navigation>

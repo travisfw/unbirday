@@ -7,7 +7,7 @@
         android:title="@string/events_notification_channel"
         app:icon="@drawable/ic_notifications_24dp">
 
-        <com.minar.birday.preferences.standard.TimePickerPreference
+        <travisfw.unbirday.preferences.standard.TimePickerPreference
             android:layout="@layout/time_picker_row"
             android:selectable="true" />
 
@@ -37,7 +37,7 @@
             android:widgetLayout="@layout/preference_switch_widget"
             app:iconSpaceReserved="false" />
 
-        <com.minar.birday.preferences.standard.NotificationSoundPreference
+        <travisfw.unbirday.preferences.standard.NotificationSoundPreference
             android:layout="@layout/notification_sound_row"
             android:selectable="true" />
 
@@ -125,19 +125,19 @@
         android:title="@string/import_export"
         app:icon="@drawable/ic_backup_restore_24dp">
 
-        <com.minar.birday.preferences.backup.UnbirdayExporter
+        <travisfw.unbirday.preferences.backup.UnbirdayExporter
             android:layout="@layout/unbirday_export_row"
             android:selectable="true" />
 
-        <com.minar.birday.preferences.backup.UnbirdayImporter
+        <travisfw.unbirday.preferences.backup.UnbirdayImporter
             android:layout="@layout/unbirday_import_row"
             android:selectable="true" />
 
-        <com.minar.birday.preferences.backup.ContactsImporter
+        <travisfw.unbirday.preferences.backup.ContactsImporter
             android:layout="@layout/contacts_import_row"
             android:selectable="true" />
 
-        <com.minar.birday.preferences.backup.CalendarImporter
+        <travisfw.unbirday.preferences.backup.CalendarImporter
             android:layout="@layout/calendar_import_row"
             android:selectable="true" />
 
@@ -158,7 +158,7 @@
         android:title="@string/troubleshoot"
         app:icon="@drawable/ic_troubleshoot_24dp">
 
-        <com.minar.birday.preferences.standard.DisableOptimizationsPreference
+        <travisfw.unbirday.preferences.standard.DisableOptimizationsPreference
             android:layout="@layout/disable_optimizations_row"
             android:selectable="true" />
 

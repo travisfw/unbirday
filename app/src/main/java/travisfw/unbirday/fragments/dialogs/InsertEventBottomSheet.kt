@@ -1,0 +1,495 @@
+package travisfw.unbirday.fragments.dialogs
+
+import android.graphics.Bitmap
+import android.graphics.ImageDecoder
+import android.media.ThumbnailUtils
+import android.net.Uri
+import android.os.Build
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.provider.MediaStore
+import android.text.Editable
+import android.text.TextWatcher
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import androidx.core.graphics.drawable.toBitmap
+import androidx.fragment.app.viewModels
+import androidx.navigation.fragment.findNavController
+import com.google.android.material.bottomsheet.BottomSheetBehavior
+import com.google.android.material.bottomsheet.BottomSheetDialog
+import com.google.android.material.bottomsheet.BottomSheetDialogFragment
+import com.google.android.material.datepicker.CalendarConstraints
+import com.google.android.material.datepicker.MaterialDatePicker
+import travisfw.unbirday.R
+import travisfw.unbirday.activities.MainActivity
+import travisfw.unbirday.adapters.ContactsFilterArrayAdapter
+import travisfw.unbirday.databinding.BottomSheetInsertEventBinding
+import travisfw.unbirday.model.ContactInfo
+import travisfw.unbirday.model.Event
+import travisfw.unbirday.model.EventCode
+import travisfw.unbirday.model.EventResult
+import travisfw.unbirday.utilities.*
+import travisfw.unbirday.viewmodels.InsertEventViewModel
+import java.io.IOException
+import java.time.DayOfWeek
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
+import java.time.format.TextStyle
+import java.util.*
+
+
+@OptIn(ExperimentalStdlibApi::class)
+class InsertEventBottomSheet(
+    private val act: MainActivity,
+    private val event: EventResult? = null
+) :
+    BottomSheetDialogFragment() {
+    private var _binding: BottomSheetInsertEventBinding? = null
+    private val binding get() = _binding!!
+    private lateinit var resultLauncher: ActivityResultLauncher<String>
+    private var imageChosen = false
+    private val viewModel: InsertEventViewModel by viewModels()
+
+    override fun onCreateView(
+        inflater: LayoutInflater,
+        container: ViewGroup?,
+        savedInstanceState: Bundle?
+    ): View {
+        // Inflate the bottom sheet, initialize the shared preferences and the recent options list
+        _binding = BottomSheetInsertEventBinding.inflate(inflater, container, false)
+
+        // Result launcher stuff
+        resultLauncher =
+            registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+                // Handle the returned Uri (atm, the image can't be cropped)
+                if (uri != null) {
+                    imageChosen = true
+                    setImage(uri)
+                }
+            }
+        return binding.root
+    }
+
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        // Fully expand the dialog
+        (dialog as BottomSheetDialog).behavior.state = BottomSheetBehavior.STATE_EXPANDED
+
+        // Animate the drawable in loop
+        val titleIcon = binding.insertEventImage
+        val title = binding.insertEventTitle
+        if (event == null) act.animateAvd(
+            titleIcon,
+            R.drawable.animated_insert_event,
+            2500L
+        )
+        else act.animateAvd(titleIcon, R.drawable.animated_edit_event, 2500L)
+
+        // Show a bottom sheet containing the form to insert a new event
+        imageChosen = false
+        var nameValue = "error"
+        var surnameValue = ""
+        // The initial date is today
+        var eventDateValue: LocalDate = LocalDate.now()
+        var countYearValue = false
+        var dayOfWeekValue: Int? = null // SQLite 0=SUNDAY..6=SATURDAY, null when yearMatter=true
+        var dayOfMonthValue: Int? = null // 1-31, null when yearMatter=true
+        val positiveButton = binding.positiveButton
+        val negativeButton = binding.negativeButton
+        val eventImage = binding.imageEvent
+        var typeValue = EventCode.BIRTHDAY.name
+        positiveButton.isEnabled = false
+
+        if (event != null) {
+            typeValue = event.type!!
+            nameValue = event.name
+            surnameValue = event.surname ?: ""
+            countYearValue = event.yearMatter ?: true
+            eventDateValue = event.originalDate
+            dayOfWeekValue = event.dayOfWeek
+            dayOfMonthValue = if (event.dayOfWeek != null) event.originalDate.dayOfMonth else null
+            positiveButton.text = getString(R.string.update_event)
+            title.text = getString(R.string.edit_event)
+
+            // Set the fields
+            val type = binding.typeEvent
+            val name = binding.nameEvent
+            val surname = binding.surnameEvent
+            val eventDate = binding.dateEvent
+            val countYear = binding.countYearSwitch
+            type.setText(typeValue, false)
+            name.setText(nameValue)
+            surname.setText(surnameValue)
+            countYear.isChecked = countYearValue
+            val formatter: DateTimeFormatter = DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
+            eventDate.setText(eventDateValue.format(formatter))
+            imageChosen = setEventImageOrPlaceholder(event, eventImage)
+            positiveButton.isEnabled = true
+
+            // If yearMatter=false, show DOW/DOM pickers and hide date picker
+            if (!countYearValue) {
+                binding.dateEventLayout.visibility = View.GONE
+                binding.dayOfWeekLayout.visibility = View.VISIBLE
+                binding.dayOfMonthLayout.visibility = View.VISIBLE
+                if (dayOfWeekValue != null) {
+                    val dowName = dayOfWeekValue!!.toDayOfWeek().getDisplayName(TextStyle.FULL, Locale.getDefault())
+                    binding.dayOfWeekEvent.setText(dowName, false)
+                }
+                if (dayOfMonthValue != null) {
+                    binding.dayOfMonthEvent.setText(formatOrdinal(dayOfMonthValue!!), false)
+                }
+            }
+        }
+        positiveButton.setOnClickListener {
+            var image: ByteArray? = null
+            if (imageChosen)
+                image = bitmapToByteArray(eventImage.drawable.toBitmap())
+            // Compute the final dayOfWeek and originalDate
+            val finalDayOfWeek: Int? = if (!countYearValue) dayOfWeekValue else null
+            val finalOriginalDate = if (!countYearValue && dayOfMonthValue != null) {
+                // Store as 1970-01-dayOfMonth for yearMatter=false entries
+                LocalDate.of(1970, 1, dayOfMonthValue!!)
+            } else eventDateValue
+
+            // Use the data to create an event object and insert it in the db
+            val tuple = if (event != null) Event(
+                id = event.id,
+                type = typeValue,
+                originalDate = finalOriginalDate,
+                name = nameValue.smartFixName(),
+                yearMatter = countYearValue,
+                surname = surnameValue.smartFixName(),
+                favorite = event.favorite,
+                notes = event.notes,
+                dayOfWeek = finalDayOfWeek,
+                image = image
+            ) else
+                Event(
+                    id = 0,
+                    originalDate = finalOriginalDate,
+                    name = nameValue.smartFixName(),
+                    surname = surnameValue.smartFixName(),
+                    yearMatter = countYearValue,
+                    type = typeValue,
+                    dayOfWeek = finalDayOfWeek,
+                    image = image,
+                )
+            // Insert using another thread
+            val thread = Thread {
+                if (event != null) {
+                    act.mainViewModel.update(tuple)
+                    // Go back to the first screen to avoid updating the displayed details
+                    act.runOnUiThread { findNavController().popBackStack() }
+                } else act.mainViewModel.insert(tuple)
+            }
+            thread.start()
+            dismiss()
+        }
+        negativeButton.setOnClickListener {
+            dismiss()
+        }
+
+        // Setup listeners and checks on the fields
+        val type = binding.typeEvent
+        val name = binding.nameEvent
+        val surname = binding.surnameEvent
+        val eventDate = binding.dateEvent
+        val countYear = binding.countYearSwitch
+
+        // Set the dropdown to show the available event types
+        val items = getAvailableTypes(act)
+        val eventTypeAdapter = ArrayAdapter(act, R.layout.event_type_list_item, items)
+        with(type) {
+            setAdapter(eventTypeAdapter)
+            setText(getStringForTypeCodename(context, typeValue), false)
+            onItemClickListener =
+                AdapterView.OnItemClickListener { _, _, position, _ ->
+                    typeValue = items[position].codeName.name
+                    // Automatically uncheck "the year matters" for name days
+                    if (typeValue == EventCode.NAME_DAY.name) {
+                        countYear.isChecked = false
+                        countYear.isEnabled = false
+                        countYearValue = false
+                    } else {
+                        countYear.isChecked = true
+                        countYear.isEnabled = true
+                        countYearValue = true
+                    }
+                    if (!imageChosen)
+                        eventImage.setImageDrawable(
+                            ContextCompat.getDrawable(
+                                context,
+                                // Set the image depending on the event type
+                                when (typeValue) {
+                                    EventCode.BIRTHDAY.name -> R.drawable.placeholder_birthday_image
+                                    EventCode.ANNIVERSARY.name -> R.drawable.placeholder_anniversary_image
+                                    EventCode.DEATH.name -> R.drawable.placeholder_death_image
+                                    EventCode.NAME_DAY.name -> R.drawable.placeholder_name_day_image
+                                    else -> R.drawable.placeholder_other_image
+                                }
+                            )
+                        )
+                }
+        }
+
+        // Initialize contacts list, using InsertEventViewModel
+        viewModel.initContactsList(act)
+        viewModel.contactsList.observe(viewLifecycleOwner) { contacts ->
+            // Setup AutoCompleteEditText adapters
+            binding.nameEvent.setAdapter(
+                ContactsFilterArrayAdapter(
+                    requireContext(),
+                    contacts,
+                    ContactInfo::name,
+                )
+            )
+            binding.surnameEvent.setAdapter(
+                ContactsFilterArrayAdapter(
+                    requireContext(),
+                    contacts,
+                    ContactInfo::surname,
+                )
+            )
+
+            val onAutocompleteClick = AdapterView.OnItemClickListener { parent, _, i, _ ->
+                val clickedItem =
+                    parent.getItemAtPosition(i) as? ContactInfo ?: return@OnItemClickListener
+                binding.nameEvent.setText(clickedItem.name)
+                binding.surnameEvent.setText(clickedItem.surname)
+            }
+            binding.nameEvent.onItemClickListener = onAutocompleteClick
+            binding.surnameEvent.onItemClickListener = onAutocompleteClick
+        }
+
+        // Calendar setup. The end date is the last day in the following year (dumb users)
+        val startDate = Calendar.getInstance()
+        val endDate = Calendar.getInstance()
+        endDate.set(Calendar.YEAR, endDate.get(Calendar.YEAR) + 1)
+        endDate.set(Calendar.DAY_OF_YEAR, endDate.getActualMaximum(Calendar.DAY_OF_YEAR))
+        startDate.set(START_YEAR, 1, 1)
+        val formatter: DateTimeFormatter = DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
+        var dateDialog: MaterialDatePicker<Long>? = null
+
+        // To automatically show the last selected date, parse it to another Calendar object
+        val lastDate = Calendar.getInstance()
+        lastDate.set(eventDateValue.year, eventDateValue.monthValue - 1, eventDateValue.dayOfMonth)
+
+        var nameCorrect = false
+        var surnameCorrect = true // Surname is not mandatory
+        var eventDateCorrect = event != null
+
+        // Setup day-of-week dropdown
+        val dayOfWeekNames = DayOfWeek.entries.map { it.getDisplayName(TextStyle.FULL, Locale.getDefault()) }
+        val dowAdapter = ArrayAdapter(act, R.layout.event_type_list_item, dayOfWeekNames)
+        binding.dayOfWeekEvent.setAdapter(dowAdapter)
+        binding.dayOfWeekEvent.onItemClickListener = AdapterView.OnItemClickListener { _, _, position, _ ->
+            dayOfWeekValue = (position + 1) % 7 // SQLite: 0=Sun, 1=Mon…6=Sat (entries order: Mon…Sun)
+            if (!countYearValue) positiveButton.isEnabled = dayOfMonthValue != null && nameCorrect && surnameCorrect
+        }
+
+        // Setup day-of-month dropdown
+        val dayOfMonthItems = (1..31).map { formatOrdinal(it) }
+        val domAdapter = ArrayAdapter(act, R.layout.event_type_list_item, dayOfMonthItems)
+        binding.dayOfMonthEvent.setAdapter(domAdapter)
+        binding.dayOfMonthEvent.onItemClickListener = AdapterView.OnItemClickListener { _, _, position, _ ->
+            dayOfMonthValue = position + 1
+            if (!countYearValue) positiveButton.isEnabled = dayOfWeekValue != null && nameCorrect && surnameCorrect
+        }
+
+        // For new events, initialize UI to match default yearMatter=false
+        if (event == null) {
+            countYear.isChecked = false
+            binding.dateEventLayout.visibility = View.GONE
+            binding.dayOfWeekLayout.visibility = View.VISIBLE
+            binding.dayOfMonthLayout.visibility = View.VISIBLE
+        }
+
+        // Update the boolean value on each click and toggle DOW/DOM pickers
+        countYear.setOnCheckedChangeListener { _, isChecked ->
+            countYearValue = isChecked
+            if (!isChecked) {
+                // Show DOW/DOM pickers, hide date picker
+                binding.dateEventLayout.visibility = View.GONE
+                binding.dayOfWeekLayout.visibility = View.VISIBLE
+                binding.dayOfMonthLayout.visibility = View.VISIBLE
+            } else {
+                // Show date picker, hide DOW/DOM pickers
+                binding.dateEventLayout.visibility = View.VISIBLE
+                binding.dayOfWeekLayout.visibility = View.GONE
+                binding.dayOfMonthLayout.visibility = View.GONE
+            }
+            val dowDomCorrect = dayOfWeekValue != null && dayOfMonthValue != null
+            val dateValid = if (!isChecked) dowDomCorrect else eventDateCorrect
+            positiveButton.isEnabled = dateValid && nameCorrect && surnameCorrect
+        }
+
+        eventImage.setOnClickListener {
+            resultLauncher.launch("image/*")
+        }
+
+        eventDate.setOnClickListener {
+            // Prevent double dialogs on fast click
+            if (dateDialog == null) {
+                // Build constraints
+                val constraints =
+                    CalendarConstraints.Builder()
+                        .setStart(startDate.timeInMillis)
+                        .setEnd(endDate.timeInMillis)
+                        .build()
+
+                // Build the dialog itself
+                dateDialog =
+                    MaterialDatePicker.Builder.datePicker()
+                        .setTitleText(R.string.insert_date_hint)
+                        .setSelection(lastDate.timeInMillis)
+                        .setCalendarConstraints(constraints)
+                        .build()
+
+                // The user pressed ok
+                dateDialog!!.addOnPositiveButtonClickListener {
+                    val selection = it
+                    if (selection != null) {
+                        val date = Calendar.getInstance()
+                        // Use a standard timezone to avoid wrong date on different time zones
+                        date.timeZone = TimeZone.getTimeZone("UTC")
+                        date.timeInMillis = selection
+                        val year = date.get(Calendar.YEAR)
+                        val month = date.get(Calendar.MONTH) + 1
+                        val day = date.get(Calendar.DAY_OF_MONTH)
+                        eventDateValue = LocalDate.of(year, month, day)
+                        val todayDate = LocalDate.now()
+
+                        // Force the date to be max one day after today, to consider different time zones
+                        while (eventDateValue.isAfter(todayDate.plusDays(1))) {
+                            eventDateValue = LocalDate.of(
+                                todayDate.year - 1,
+                                eventDateValue.monthValue,
+                                eventDateValue.dayOfMonth
+                            )
+                        }
+                        eventDate.setText(eventDateValue.format(formatter))
+                        // The last selected date is saved if the dialog is reopened
+                        lastDate.set(eventDateValue.year, month - 1, day)
+                    }
+
+                }
+                // Show the picker and wait to reset the variable
+                dateDialog!!.show(act.supportFragmentManager, "main_act_picker")
+                Handler(Looper.getMainLooper()).postDelayed({ dateDialog = null }, 750)
+            }
+        }
+
+        // Validate each field in the form with the same watcher
+        val watcher = afterTextChangedWatcher { editable ->
+            when {
+                editable === name.editableText -> {
+                    val nameText = name.text.toString()
+                    if (nameText.isBlank() || !checkName(nameText)) {
+                        // Setting the error on the layout is important to make the properties work
+                        binding.nameEventLayout.error =
+                            getString(R.string.invalid_value_name)
+                        positiveButton.isEnabled = false
+                        nameCorrect = false
+                    } else {
+                        nameValue = nameText
+                        binding.nameEventLayout.error = null
+                        nameCorrect = true
+                    }
+                }
+
+                editable === surname.editableText -> {
+                    val surnameText = surname.text.toString()
+                    if (!checkName(surnameText)) {
+                        // Setting the error on the layout is important to make the properties work
+                        binding.surnameEventLayout.error =
+                            getString(R.string.invalid_value_name)
+                        positiveButton.isEnabled = false
+                        surnameCorrect = false
+                    } else {
+                        surnameValue = surnameText
+                        binding.surnameEventLayout.error = null
+                        surnameCorrect = true
+                    }
+                }
+                // Once selected, the date can't be blank anymore
+                editable === eventDate.editableText -> eventDateCorrect = true
+            }
+            // When yearMatter=false, also check that DOW and DOM are selected
+            val dowDomCorrect = if (!countYearValue) (dayOfWeekValue != null && dayOfMonthValue != null) else true
+            val dateValid = if (!countYearValue) dowDomCorrect else eventDateCorrect
+            if (dateValid && nameCorrect && surnameCorrect) positiveButton.isEnabled = true
+            else positiveButton.isEnabled = false
+        }
+        name.addTextChangedListener(watcher)
+        surname.addTextChangedListener(watcher)
+        eventDate.addTextChangedListener(watcher)
+        // Also trigger validation when DOW/DOM are selected
+        binding.dayOfWeekEvent.addTextChangedListener(watcher)
+        binding.dayOfMonthEvent.addTextChangedListener(watcher)
+    }
+
+    override fun onDestroyView() {
+        super.onDestroyView()
+        // Reset the binding to null to follow the best practice
+        _binding = null
+    }
+
+    // Set the chosen image in the circular image
+    private fun setImage(data: Uri) {
+        var bitmap: Bitmap? = null
+        try {
+            if (Build.VERSION.SDK_INT < 29) {
+                @Suppress("DEPRECATION")
+                bitmap = MediaStore.Images.Media.getBitmap(act.contentResolver, data)
+            } else {
+                val source = ImageDecoder.createSource(act.contentResolver, data)
+                bitmap = ImageDecoder.decodeBitmap(source)
+            }
+        } catch (_: IOException) {
+        }
+        if (bitmap == null) return
+
+        // Bitmap ready. Avoid images larger than 450*450
+        var dimension: Int = getBitmapSquareSize(bitmap)
+        if (dimension > 450) dimension = 450
+
+        val resizedBitmap = ThumbnailUtils.extractThumbnail(
+            bitmap,
+            dimension,
+            dimension,
+            ThumbnailUtils.OPTIONS_RECYCLE_INPUT,
+        )
+        val image = binding.imageEvent
+        image.setImageBitmap(resizedBitmap)
+    }
+
+    private inline fun afterTextChangedWatcher(crossinline afterTextChanged: (editable: Editable) -> Unit) =
+        object : TextWatcher {
+            override fun beforeTextChanged(
+                charSequence: CharSequence,
+                i: Int,
+                i1: Int,
+                i2: Int
+            ) {
+            }
+
+            override fun onTextChanged(
+                charSequence: CharSequence,
+                i: Int,
+                i1: Int,
+                i2: Int
+            ) {
+            }
+
+            override fun afterTextChanged(editable: Editable) {
+                afterTextChanged(editable)
+            }
+        }
+}
