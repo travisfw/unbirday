@@ -29,6 +29,8 @@ data class Event(
     val originalDate: LocalDate,
     @Expose
     val notes: String? = "",
+    @Expose
+    val dayOfWeek: Int? = null, // SQLite strftime('%w') convention: 0=SUNDAY..6=SATURDAY, only set when yearMatter=false
     @ColumnInfo(typeAffinity = ColumnInfo.BLOB)
     val image: ByteArray? = null,
 ) {
@@ -43,6 +45,7 @@ data class Event(
         if (name != other.name) return false
         if (surname != other.surname) return false
         if (originalDate != other.originalDate) return false
+        if (dayOfWeek != other.dayOfWeek) return false
         if (!image.contentEquals(other.image)) return false
 
         return true
@@ -57,6 +60,7 @@ data class Event(
         result = 31 * result + (yearMatter?.hashCode() ?: 0)
         result = 31 * result + originalDate.hashCode()
         result = 31 * result + (notes?.hashCode() ?: 0)
+        result = 31 * result + (dayOfWeek?.hashCode() ?: 0)
         result = 31 * result + (image?.contentHashCode() ?: 0)
         return result
     }

@@ -13,11 +13,11 @@ android {
     buildToolsVersion = "35.0.0"
 
     defaultConfig {
-        applicationId = "com.minar.birday"
+        applicationId = "com.minar.unbirday"
         targetSdk = 36
         minSdk = 26
-        versionCode = 37
-        versionName = "4.7.2"
+        versionCode = 38
+        versionName = "069yr.00"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

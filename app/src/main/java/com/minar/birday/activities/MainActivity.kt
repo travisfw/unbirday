@@ -61,8 +61,8 @@ import com.minar.birday.fragments.dialogs.ImportContactsBottomSheet
 import com.minar.birday.fragments.dialogs.InsertEventBottomSheet
 import com.minar.birday.model.Event
 import com.minar.birday.model.EventResult
-import com.minar.birday.preferences.backup.BirdayExporter
-import com.minar.birday.preferences.backup.BirdayImporter
+import com.minar.birday.preferences.backup.UnbirdayExporter
+import com.minar.birday.preferences.backup.UnbirdayImporter
 import com.minar.birday.preferences.backup.CalendarExporter
 import com.minar.birday.preferences.backup.CalendarImporter
 import com.minar.birday.preferences.backup.ContactsImporter
@@ -70,7 +70,6 @@ import com.minar.birday.preferences.backup.CsvExporter
 import com.minar.birday.preferences.backup.CsvImporter
 import com.minar.birday.preferences.backup.JsonExporter
 import com.minar.birday.preferences.backup.JsonImporter
-import com.minar.birday.utilities.AppRater
 import com.minar.birday.utilities.addInsetsByMargin
 import com.minar.birday.utilities.addInsetsByPadding
 import com.minar.birday.utilities.applyLoopingAnimatedVectorDrawable
@@ -256,9 +255,6 @@ class MainActivity : AppCompatActivity() {
                 navController.popBackStack()
         }
 
-        // Rating stuff
-        AppRater.appLaunched(this)
-
         // Manage the fab
         val addFab = binding.fab
         val deleteFab = binding.fabDelete
@@ -381,9 +377,8 @@ class MainActivity : AppCompatActivity() {
         // Only the next events, without considering the search string, ordered
         mainViewModel.allEventsUnfiltered.observe(this)
         {
-            // Update the widgets and the stats, to avoid strange behaviors when searching
+            // Update the widgets to avoid strange behaviors when searching
             updateWidget()
-            mainViewModel.getStats(it, this)
         }
 
         onBackPressedDispatcher.addCallback(this, backHomeCallback)
@@ -400,7 +395,7 @@ class MainActivity : AppCompatActivity() {
         if (autoExport && currentTime > allowedExportTime) {
             sharedPrefs.edit { putLong("last_auto_export", currentTime) }
             val thread = Thread {
-                BirdayExporter.exportEvents(this, uri = exportFolderUri, autoBackup = true)
+                UnbirdayExporter.exportEvents(this, uri = exportFolderUri, autoBackup = true)
             }
             thread.start()
         }
@@ -488,7 +483,7 @@ class MainActivity : AppCompatActivity() {
                     }
 
                     else -> {
-                        val birdayImporter = BirdayImporter(this, null)
+                        val birdayImporter = UnbirdayImporter(this, null)
                         birdayImporter.importEvents(this, fileUri)
                     }
                 }
@@ -508,7 +503,7 @@ class MainActivity : AppCompatActivity() {
             sharedPrefs.edit(commit = true) { putString("export_folder", uri.toString()) }
             lifecycleScope.launch {
                 val exportedPath = withContext(Dispatchers.IO) {
-                    BirdayExporter.exportEvents(
+                    UnbirdayExporter.exportEvents(
                         applicationContext,
                         uri,
                         false
@@ -656,13 +651,6 @@ class MainActivity : AppCompatActivity() {
     // Insert a previously deleted event back in the database
     fun insertBack(eventResult: EventResult) {
         mainViewModel.insert(resultToEvent(eventResult))
-    }
-
-    // Force refresh the stats, useful when the events are the same, but something else changes
-    fun forceRefreshStats() {
-        val events = mainViewModel.allEventsUnfiltered.value
-        if (events != null)
-            mainViewModel.getStats(events, this)
     }
 
     // Change the fab to show a delete icon

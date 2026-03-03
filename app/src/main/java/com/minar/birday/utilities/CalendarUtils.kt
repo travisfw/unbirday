@@ -95,7 +95,7 @@ fun addEvent(
         put(CalendarContract.Events.CALENDAR_ID, calendarId)
         put(CalendarContract.Events.EVENT_TIMEZONE, TimeZone.getDefault().id)
         put(CalendarContract.Events.ALL_DAY, 1)
-        put(CalendarContract.Events.RRULE, "FREQ=YEARLY") // Yearly, of course
+        // No RRULE — unbirday events are individual non-recurring occurrences
     }
     // Stop if the event already exists
     if (isEventDuplicate(context, title)) {

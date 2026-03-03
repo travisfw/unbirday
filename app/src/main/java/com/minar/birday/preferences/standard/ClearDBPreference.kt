@@ -39,7 +39,7 @@ class ClearDBPreference(context: Context, attrs: AttributeSet?) :
             .setPositiveButton(act.resources.getString(android.R.string.ok)) { dialog, _ ->
                 CoroutineScope(Dispatchers.IO).launch {
                     // Delete every saved data and send a snackbar
-                    EventDatabase.getBirdayDatabase(context).clearAllTables()
+                    EventDatabase.getUnbirdayDatabase(context).clearAllTables()
                 }.invokeOnCompletion {
                     act.showSnackbar(
                         context.getString(R.string.app_intro_done_button).lowercase()

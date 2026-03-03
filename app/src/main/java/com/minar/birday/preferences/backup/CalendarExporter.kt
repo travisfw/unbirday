@@ -12,7 +12,10 @@ import com.minar.birday.utilities.addEvent
 import com.minar.birday.utilities.createOrGetCalendar
 import com.minar.birday.utilities.deleteLocalCalendar
 import com.minar.birday.utilities.formatName
+import com.minar.birday.utilities.formatUnbirdayForEvent
+import com.minar.birday.utilities.getEffectiveDayOfWeek
 import com.minar.birday.utilities.getStringForTypeCodename
+import java.time.LocalDate
 import java.time.ZoneOffset
 import kotlin.concurrent.thread
 
@@ -83,30 +86,33 @@ class CalendarExporter(context: Context, attrs: AttributeSet?) : Preference(cont
 
     }
 
-    // Write each event as an entry on the Birday calendar, in the local calendar app
+    // Write each event as individual non-recurring entries for all unbirday occurrences in 2 years
     private fun writeEventsToCalendar(
         context: Context,
         events: List<EventResult>,
         calendarId: Long
     ): Boolean {
         try {
-            // Always first name first, to simplify a bit, plus the event type
+            val today = LocalDate.now()
+            val endDate = today.plusYears(2)
+
             for (event in events) {
-                val startDate =
-                    event.originalDate.atStartOfDay().toInstant(ZoneOffset.UTC).toEpochMilli()
+                val dayOfWeek = getEffectiveDayOfWeek(event)
+                val dayOfMonth = event.originalDate.dayOfMonth
+                val unbirdayLabel = formatUnbirdayForEvent(event)
                 val eventName = formatName(event, false) + " - ${
-                    getStringForTypeCodename(
-                        context,
-                        event.type!!
-                    )
-                }"
-                addEvent(
-                    context,
-                    calendarId,
-                    eventName,
-                    event.notes,
-                    startDate
-                )
+                    getStringForTypeCodename(context, event.type!!)
+                } ($unbirdayLabel)"
+
+                // Find all matching dates in the next 2 years
+                var candidate = today
+                while (candidate.isBefore(endDate)) {
+                    if (candidate.dayOfMonth == dayOfMonth && candidate.dayOfWeek == dayOfWeek) {
+                        val startMillis = candidate.atStartOfDay().toInstant(ZoneOffset.UTC).toEpochMilli()
+                        addEvent(context, calendarId, eventName, event.notes, startMillis)
+                    }
+                    candidate = candidate.plusDays(1)
+                }
             }
             return true
         } catch (e: Exception) {

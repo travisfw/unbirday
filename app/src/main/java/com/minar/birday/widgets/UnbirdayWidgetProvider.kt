@@ -18,6 +18,7 @@ import com.minar.birday.model.EventResult
 import com.minar.birday.persistence.EventDao
 import com.minar.birday.persistence.EventDatabase
 import com.minar.birday.utilities.byteArrayToBitmap
+import com.minar.birday.utilities.eventToResult
 import com.minar.birday.utilities.formatEventList
 import com.minar.birday.utilities.getNextYears
 import com.minar.birday.utilities.maxNumberOfAdditionalNotificationDays
@@ -27,7 +28,7 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 
-abstract class BirdayWidgetProvider : AppWidgetProvider() {
+abstract class UnbirdayWidgetProvider : AppWidgetProvider() {
     abstract var widgetLayout: Int
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -146,8 +147,8 @@ abstract class BirdayWidgetProvider : AppWidgetProvider() {
 
         Thread {
             // Get the next events and the proper formatter
-            val eventDao: EventDao = EventDatabase.getBirdayDatabase(context).eventDao()
-            val orderedEvents: List<EventResult> = eventDao.getOrderedEventsStatic()
+            val eventDao: EventDao = EventDatabase.getUnbirdayDatabase(context).eventDao()
+            val orderedEvents: List<EventResult> = eventDao.getAllEventsStatic().map { eventToResult(it) }.sortedBy { it.nextDate }
 
             // Launch the app on click
             intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
@@ -250,8 +251,12 @@ abstract class BirdayWidgetProvider : AppWidgetProvider() {
         views.setTextViewText(R.id.eventWidgetDate, fullFormatter.format(LocalDate.now()))
         Thread {
             // Get the next events and the proper formatter
-            val eventDao: EventDao = EventDatabase.getBirdayDatabase(context).eventDao()
-            val nextEvents: List<EventResult> = eventDao.getOrderedNextEventsStatic()
+            val eventDao: EventDao = EventDatabase.getUnbirdayDatabase(context).eventDao()
+            val allResults = eventDao.getAllEventsStatic().map { eventToResult(it) }.sortedBy { it.nextDate }
+            val nextEvents: List<EventResult> = if (allResults.isNotEmpty()) {
+                val firstNextDate = allResults[0].nextDate
+                allResults.filter { it.nextDate == firstNextDate }
+            } else emptyList()
 
             // Launch the app on click
             intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)

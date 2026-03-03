@@ -38,9 +38,11 @@ import com.minar.birday.model.EventResult
 import com.minar.birday.utilities.*
 import com.minar.birday.viewmodels.InsertEventViewModel
 import java.io.IOException
+import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
+import java.time.format.TextStyle
 import java.util.*
 
 
@@ -96,7 +98,9 @@ class InsertEventBottomSheet(
         var surnameValue = ""
         // The initial date is today
         var eventDateValue: LocalDate = LocalDate.now()
-        var countYearValue = true
+        var countYearValue = false
+        var dayOfWeekValue: Int? = null // SQLite 0=SUNDAY..6=SATURDAY, null when yearMatter=true
+        var dayOfMonthValue: Int? = null // 1-31, null when yearMatter=true
         val positiveButton = binding.positiveButton
         val negativeButton = binding.negativeButton
         val eventImage = binding.imageEvent
@@ -109,6 +113,8 @@ class InsertEventBottomSheet(
             surnameValue = event.surname ?: ""
             countYearValue = event.yearMatter ?: true
             eventDateValue = event.originalDate
+            dayOfWeekValue = event.dayOfWeek
+            dayOfMonthValue = if (event.dayOfWeek != null) event.originalDate.dayOfMonth else null
             positiveButton.text = getString(R.string.update_event)
             title.text = getString(R.string.edit_event)
 
@@ -126,30 +132,53 @@ class InsertEventBottomSheet(
             eventDate.setText(eventDateValue.format(formatter))
             imageChosen = setEventImageOrPlaceholder(event, eventImage)
             positiveButton.isEnabled = true
+
+            // If yearMatter=false, show DOW/DOM pickers and hide date picker
+            if (!countYearValue) {
+                binding.dateEventLayout.visibility = View.GONE
+                binding.dayOfWeekLayout.visibility = View.VISIBLE
+                binding.dayOfMonthLayout.visibility = View.VISIBLE
+                if (dayOfWeekValue != null) {
+                    val dowName = dayOfWeekValue!!.toDayOfWeek().getDisplayName(TextStyle.FULL, Locale.getDefault())
+                    binding.dayOfWeekEvent.setText(dowName, false)
+                }
+                if (dayOfMonthValue != null) {
+                    binding.dayOfMonthEvent.setText(formatOrdinal(dayOfMonthValue!!), false)
+                }
+            }
         }
         positiveButton.setOnClickListener {
             var image: ByteArray? = null
             if (imageChosen)
                 image = bitmapToByteArray(eventImage.drawable.toBitmap())
+            // Compute the final dayOfWeek and originalDate
+            val finalDayOfWeek: Int? = if (!countYearValue) dayOfWeekValue else null
+            val finalOriginalDate = if (!countYearValue && dayOfMonthValue != null) {
+                // Store as 1970-01-dayOfMonth for yearMatter=false entries
+                LocalDate.of(1970, 1, dayOfMonthValue!!)
+            } else eventDateValue
+
             // Use the data to create an event object and insert it in the db
             val tuple = if (event != null) Event(
                 id = event.id,
                 type = typeValue,
-                originalDate = eventDateValue,
+                originalDate = finalOriginalDate,
                 name = nameValue.smartFixName(),
                 yearMatter = countYearValue,
                 surname = surnameValue.smartFixName(),
                 favorite = event.favorite,
                 notes = event.notes,
+                dayOfWeek = finalDayOfWeek,
                 image = image
             ) else
                 Event(
                     id = 0,
-                    originalDate = eventDateValue,
+                    originalDate = finalOriginalDate,
                     name = nameValue.smartFixName(),
                     surname = surnameValue.smartFixName(),
                     yearMatter = countYearValue,
                     type = typeValue,
+                    dayOfWeek = finalDayOfWeek,
                     image = image,
                 )
             // Insert using another thread
@@ -252,9 +281,53 @@ class InsertEventBottomSheet(
         val lastDate = Calendar.getInstance()
         lastDate.set(eventDateValue.year, eventDateValue.monthValue - 1, eventDateValue.dayOfMonth)
 
-        // Update the boolean value on each click
+        var nameCorrect = false
+        var surnameCorrect = true // Surname is not mandatory
+        var eventDateCorrect = event != null
+
+        // Setup day-of-week dropdown
+        val dayOfWeekNames = DayOfWeek.entries.map { it.getDisplayName(TextStyle.FULL, Locale.getDefault()) }
+        val dowAdapter = ArrayAdapter(act, R.layout.event_type_list_item, dayOfWeekNames)
+        binding.dayOfWeekEvent.setAdapter(dowAdapter)
+        binding.dayOfWeekEvent.onItemClickListener = AdapterView.OnItemClickListener { _, _, position, _ ->
+            dayOfWeekValue = (position + 1) % 7 // SQLite: 0=Sun, 1=Mon…6=Sat (entries order: Mon…Sun)
+            if (!countYearValue) positiveButton.isEnabled = dayOfMonthValue != null && nameCorrect && surnameCorrect
+        }
+
+        // Setup day-of-month dropdown
+        val dayOfMonthItems = (1..31).map { formatOrdinal(it) }
+        val domAdapter = ArrayAdapter(act, R.layout.event_type_list_item, dayOfMonthItems)
+        binding.dayOfMonthEvent.setAdapter(domAdapter)
+        binding.dayOfMonthEvent.onItemClickListener = AdapterView.OnItemClickListener { _, _, position, _ ->
+            dayOfMonthValue = position + 1
+            if (!countYearValue) positiveButton.isEnabled = dayOfWeekValue != null && nameCorrect && surnameCorrect
+        }
+
+        // For new events, initialize UI to match default yearMatter=false
+        if (event == null) {
+            countYear.isChecked = false
+            binding.dateEventLayout.visibility = View.GONE
+            binding.dayOfWeekLayout.visibility = View.VISIBLE
+            binding.dayOfMonthLayout.visibility = View.VISIBLE
+        }
+
+        // Update the boolean value on each click and toggle DOW/DOM pickers
         countYear.setOnCheckedChangeListener { _, isChecked ->
             countYearValue = isChecked
+            if (!isChecked) {
+                // Show DOW/DOM pickers, hide date picker
+                binding.dateEventLayout.visibility = View.GONE
+                binding.dayOfWeekLayout.visibility = View.VISIBLE
+                binding.dayOfMonthLayout.visibility = View.VISIBLE
+            } else {
+                // Show date picker, hide DOW/DOM pickers
+                binding.dateEventLayout.visibility = View.VISIBLE
+                binding.dayOfWeekLayout.visibility = View.GONE
+                binding.dayOfMonthLayout.visibility = View.GONE
+            }
+            val dowDomCorrect = dayOfWeekValue != null && dayOfMonthValue != null
+            val dateValid = if (!isChecked) dowDomCorrect else eventDateCorrect
+            positiveButton.isEnabled = dateValid && nameCorrect && surnameCorrect
         }
 
         eventImage.setOnClickListener {
@@ -314,9 +387,6 @@ class InsertEventBottomSheet(
         }
 
         // Validate each field in the form with the same watcher
-        var nameCorrect = false
-        var surnameCorrect = true // Surname is not mandatory
-        var eventDateCorrect = event != null
         val watcher = afterTextChangedWatcher { editable ->
             when {
                 editable === name.editableText -> {
@@ -351,12 +421,18 @@ class InsertEventBottomSheet(
                 // Once selected, the date can't be blank anymore
                 editable === eventDate.editableText -> eventDateCorrect = true
             }
-            if (eventDateCorrect && nameCorrect && surnameCorrect) positiveButton.isEnabled =
-                true
+            // When yearMatter=false, also check that DOW and DOM are selected
+            val dowDomCorrect = if (!countYearValue) (dayOfWeekValue != null && dayOfMonthValue != null) else true
+            val dateValid = if (!countYearValue) dowDomCorrect else eventDateCorrect
+            if (dateValid && nameCorrect && surnameCorrect) positiveButton.isEnabled = true
+            else positiveButton.isEnabled = false
         }
         name.addTextChangedListener(watcher)
         surname.addTextChangedListener(watcher)
         eventDate.addTextChangedListener(watcher)
+        // Also trigger validation when DOW/DOM are selected
+        binding.dayOfWeekEvent.addTextChangedListener(watcher)
+        binding.dayOfMonthEvent.addTextChangedListener(watcher)
     }
 
     override fun onDestroyView() {

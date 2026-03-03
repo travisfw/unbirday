@@ -32,7 +32,7 @@ class CsvExporter(context: Context, attrs: AttributeSet?) : Preference(context, 
             act.showSnackbar(context.getString(R.string.no_events))
             return
         }
-        val fileName = "BirdayCsv_${LocalDate.now()}.csv"
+        val fileName = "UnbirdayCsv_${LocalDate.now()}.csv"
         act.saveCsv.launch(fileName)
     }
 
@@ -42,11 +42,11 @@ class CsvExporter(context: Context, attrs: AttributeSet?) : Preference(context, 
             context: Context,
             uri: Uri?,
         ): String {
-            val eventDao = EventDatabase.getBirdayDatabase(context).eventDao()
+            val eventDao = EventDatabase.getUnbirdayDatabase(context).eventDao()
             val sb = StringBuilder()
-            val events = eventDao.getOrderedEventsStatic()
+            val events = eventDao.getAllEventsStatic()
             // Prepare the first row, for the column names, and the csv itself
-            sb.append("type, name, surname, yearMatter, date, notes\n")
+            sb.append("type, name, surname, yearMatter, date, notes, dayOfWeek\n")
             for (event in events) {
                 sb.append(
                     "${event.type}," +
@@ -54,7 +54,8 @@ class CsvExporter(context: Context, attrs: AttributeSet?) : Preference(context, 
                             "${(event.surname ?: "").replace(',', ' ')}," +
                             "${event.yearMatter}," +
                             "${event.originalDate}," +
-                            "${(event.notes ?: "").replace(',', ' ')}\n"
+                            "${(event.notes ?: "").replace(',', ' ')}," +
+                            "${event.dayOfWeek ?: ""}\n"
                 )
             }
             try {
@@ -76,7 +77,7 @@ class CsvExporter(context: Context, attrs: AttributeSet?) : Preference(context, 
                 } else {
                     // Legacy: write to app files dir
                     val appDir = File(context.getExternalFilesDir(null)!!.absolutePath)
-                    val fileName = "BirdayCsv_${LocalDate.now()}.csv"
+                    val fileName = "UnbirdayCsv_${LocalDate.now()}.csv"
                     val dest = File(appDir, fileName)
                     dest.writeText(sb.toString(), Charsets.UTF_8)
                     return dest.absolutePath

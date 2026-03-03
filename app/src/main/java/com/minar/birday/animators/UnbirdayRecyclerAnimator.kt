@@ -12,7 +12,7 @@ import androidx.recyclerview.widget.SimpleItemAnimator
 
 
 // Exact copy of DefaultItemAnimator, plus an upgraded add view function
-class BirdayRecyclerAnimator : SimpleItemAnimator() {
+class UnbirdayRecyclerAnimator : SimpleItemAnimator() {
     private val mPendingRemovals = ArrayList<RecyclerView.ViewHolder>()
     private val mPendingAdditions = ArrayList<RecyclerView.ViewHolder>()
     private val mPendingMoves = ArrayList<MoveInfo>()

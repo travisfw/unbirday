@@ -16,7 +16,7 @@ import java.io.File
 import java.io.IOException
 import java.time.LocalDate
 
-class BirdayExporter(context: Context, attrs: AttributeSet?) : Preference(context, attrs),
+class UnbirdayExporter(context: Context, attrs: AttributeSet?) : Preference(context, attrs),
     View.OnClickListener {
 
     override fun onBindViewHolder(holder: PreferenceViewHolder) {
@@ -33,7 +33,7 @@ class BirdayExporter(context: Context, attrs: AttributeSet?) : Preference(contex
             act.showSnackbar(context.getString(R.string.no_events))
             return
         }
-        val fileName = "BirdayBackup_${LocalDate.now()}"
+        val fileName = "UnbirdayBackup_${LocalDate.now()}"
         val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "application/octet-stream"
@@ -50,10 +50,10 @@ class BirdayExporter(context: Context, attrs: AttributeSet?) : Preference(contex
             autoBackup: Boolean = false
         ): String {
             // TODO At the moment, the autobackup has the same name of the last saved manual backup
-            val eventDao = EventDatabase.getBirdayDatabase(context).eventDao()
+            val eventDao = EventDatabase.getUnbirdayDatabase(context).eventDao()
             // Checkpoint WAL to flush DB to disk
             eventDao.checkpoint(SimpleSQLiteQuery("pragma wal_checkpoint(full)"))
-            val dbFile = context.getDatabasePath("BirdayDB").absoluteFile
+            val dbFile = context.getDatabasePath("UnbirdayDB").absoluteFile
             // Quick sanity checks
             if (!dbFile.exists() || dbFile.length() == 0L) {
                 // DB file missing or empty: return failure
@@ -83,10 +83,10 @@ class BirdayExporter(context: Context, attrs: AttributeSet?) : Preference(contex
                     return uri.toString()
                 } else {
                     // Legacy behavior: write to app files dir
-                    val dbFile = context.getDatabasePath("BirdayDB").absoluteFile
+                    val dbFile = context.getDatabasePath("UnbirdayDB").absoluteFile
                     val appDirectory = File(context.getExternalFilesDir(null)!!.absolutePath)
                     val fileName =
-                        if (autoBackup) "BirdayBackup_auto" else "BirdayBackup_${LocalDate.now()}"
+                        if (autoBackup) "UnbirdayBackup_auto" else "UnbirdayBackup_${LocalDate.now()}"
                     val fileFullPath: String = appDirectory.path + File.separator + fileName
                     // Snackbar need the UI thread to work, so they must be forced on that thread
                     try {

@@ -27,7 +27,7 @@ import androidx.preference.PreferenceManager
 import com.minar.birday.R
 import com.minar.birday.activities.MainActivity
 import com.minar.birday.adapters.EventAdapter
-import com.minar.birday.animators.BirdayRecyclerAnimator
+import com.minar.birday.animators.UnbirdayRecyclerAnimator
 import com.minar.birday.databinding.FragmentHomeBinding
 import com.minar.birday.fragments.dialogs.QuickAppsBottomSheet
 import com.minar.birday.model.EventCode
@@ -55,7 +55,6 @@ class HomeFragment : Fragment() {
     private lateinit var adapter: EventAdapter
     lateinit var act: MainActivity
     lateinit var sharedPrefs: SharedPreferences
-    private val emptyString = ""
     private var _binding: FragmentHomeBinding? = null
     private val binding get() = _binding!!
 
@@ -124,7 +123,7 @@ class HomeFragment : Fragment() {
                     start()
                 }
             } else {
-                searchBar.setText(emptyString)
+                searchBar.setText("")
             }
         }
         searchBarLayout.setEndIconOnClickListener(listener)
@@ -296,7 +295,7 @@ class HomeFragment : Fragment() {
                 if (events.isEmpty()) recycler.visibility = View.GONE
                 else {
                     recycler.visibility = View.VISIBLE
-                    recycler.itemAnimator = BirdayRecyclerAnimator()
+                    recycler.itemAnimator = UnbirdayRecyclerAnimator()
                 }
             }
         }
@@ -391,7 +390,7 @@ class HomeFragment : Fragment() {
             cardDescription.text = getString(R.string.no_next_event_description)
         } else {
             cardTitle.text = getString(R.string.search_no_result_title)
-            cardSubtitle.text = emptyString
+            cardSubtitle.text = ""
             cardDescription.text = getString(R.string.search_no_result_description)
             placeholder.text = getString(R.string.search_no_result_title)
         }
@@ -411,7 +410,6 @@ class HomeFragment : Fragment() {
         val upcomingImage = binding.upcomingImage
         var personName = ""
         var nextDateText = ""
-        var nextAge = ""
         val upcomingDate = nextEvents[0].nextDate
         val formatter: DateTimeFormatter = DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL)
 
@@ -465,37 +463,23 @@ class HomeFragment : Fragment() {
 
         // Manage multiple events in the same day considering first case, middle cases and last case if more than 3
         for (event in filteredNextEvents) {
-            // Consider the case of null surname and the case of unknown age
             val formattedPersonName =
                 formatName(event, sharedPrefs.getBoolean("surname_first", false))
-
-            val age = if (event.yearMatter!! && event.type != EventCode.NAME_DAY.name)
-                getNextYears(event)
-            else if (event.type == EventCode.NAME_DAY.name) getString(R.string.name_day)
-            else getString(R.string.unknown)
-            // Don't use the function in EventUtils since this assigns all the variables at once
             when (nextEvents.indexOf(event)) {
                 0 -> {
                     personName = formattedPersonName
                     nextDateText = nextDateFormatted(event, formatter, requireContext())
-                    nextAge = getString(R.string.next_age_years) + ": $age"
                 }
 
-                1, 2 -> {
-                    personName += ", $formattedPersonName"
-                    nextAge += ", $age"
-                }
+                1, 2 -> personName += ", $formattedPersonName"
 
-                3 -> {
-                    personName += " " + getString(R.string.event_others)
-                    nextAge += "..."
-                }
+                3 -> personName += " " + getString(R.string.event_others)
             }
             if (ChronoUnit.DAYS.between(event.nextDate, upcomingDate) < 0) break
         }
         cardTitle.text = personName
         cardSubtitle.text = nextDateText
-        cardDescription.text = nextAge
+        cardDescription.text = ""
     }
 
     // Show a bottom sheet containing some quick apps

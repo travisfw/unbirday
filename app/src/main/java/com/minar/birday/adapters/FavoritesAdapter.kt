@@ -14,11 +14,10 @@ import com.minar.birday.databinding.FavoriteRowBinding
 import com.minar.birday.model.EventCode
 import com.minar.birday.model.EventResult
 import com.minar.birday.utilities.formatName
+import com.minar.birday.utilities.formatNextDateFull
 import com.minar.birday.utilities.getNextYears
 import com.minar.birday.utilities.getRemainingDays
 import com.minar.birday.utilities.getYears
-import java.time.format.DateTimeFormatter
-import java.time.format.FormatStyle
 
 
 class FavoritesAdapter(
@@ -65,15 +64,13 @@ class FavoritesAdapter(
             val sharedPrefs = PreferenceManager.getDefaultSharedPreferences(context)
             val formattedPersonName =
                 formatName(event, sharedPrefs.getBoolean("surname_first", false))
-            val formatter: DateTimeFormatter = DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL)
             val age = getYears(event)
             val nextAge = getNextYears(event)
             val daysRemaining = getRemainingDays(event.nextDate!!)
             val daysCountdown = if (daysRemaining > 0) "-$daysRemaining"
             else context.getString(R.string.exclamation)
-            var nextDate = event.nextDate.format(formatter)
+            val nextDate = formatNextDateFull(event.nextDate)
 
-            if (event.yearMatter == false) nextDate = event.nextDate.format(formatter)
             val actualAge = if (event.type == EventCode.BIRTHDAY.name)
                 "${context.getString(R.string.next_age_years)}: $age▶$nextAge, ${context.getString(R.string.born_in)} ${event.originalDate.year}"
             else "${context.getString(R.string.next_age_years)}: $age▶$nextAge"

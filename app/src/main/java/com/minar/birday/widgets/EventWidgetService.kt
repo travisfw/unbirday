@@ -11,6 +11,7 @@ import com.minar.birday.model.EventCode
 import com.minar.birday.model.EventResult
 import com.minar.birday.persistence.EventDao
 import com.minar.birday.persistence.EventDatabase
+import com.minar.birday.utilities.eventToResult
 import com.minar.birday.utilities.formatName
 import com.minar.birday.utilities.getReducedDate
 import com.minar.birday.utilities.getRemainingDays
@@ -104,8 +105,9 @@ internal class EventWidgetRemoteViewsFactory(private val context: Context) : Rem
     }
 
     override fun onDataSetChanged() {
-        val eventDao: EventDao = EventDatabase.getBirdayDatabase(context).eventDao()
+        val eventDao: EventDao = EventDatabase.getUnbirdayDatabase(context).eventDao()
         // Remove next events to avoid double data
-        events = removeOrGetUpcomingEvents(eventDao.getOrderedEventsStatic())
+        val allResults = eventDao.getAllEventsStatic().map { eventToResult(it) }.sortedBy { it.nextDate }
+        events = removeOrGetUpcomingEvents(allResults)
     }
 }

@@ -2,10 +2,6 @@
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
-    <com.minar.birday.preferences.standard.CustomAuthorPreference
-        android:layout="@layout/author_preference_row"
-        android:selectable="false" />
-
     <PreferenceCategory
         android:key="notifications"
         android:title="@string/events_notification_channel"
@@ -70,16 +66,6 @@
             android:widgetLayout="@layout/preference_switch_widget"
             app:iconSpaceReserved="false" />
 
-        <!-- Disable astrology information -->
-        <SwitchPreferenceCompat
-            android:defaultValue="false"
-            android:key="disable_astrology"
-            android:summaryOff="@string/disable_astrology_description_off"
-            android:summaryOn="@string/disable_astrology_description_on"
-            android:title="@string/disable_astrology_title"
-            android:widgetLayout="@layout/preference_switch_widget"
-            app:iconSpaceReserved="false" />
-
         <!-- Advanced yearly calendar mode -->
         <SwitchPreferenceCompat
             android:defaultValue="false"
@@ -139,12 +125,12 @@
         android:title="@string/import_export"
         app:icon="@drawable/ic_backup_restore_24dp">
 
-        <com.minar.birday.preferences.backup.BirdayExporter
-            android:layout="@layout/birday_export_row"
+        <com.minar.birday.preferences.backup.UnbirdayExporter
+            android:layout="@layout/unbirday_export_row"
             android:selectable="true" />
 
-        <com.minar.birday.preferences.backup.BirdayImporter
-            android:layout="@layout/birday_import_row"
+        <com.minar.birday.preferences.backup.UnbirdayImporter
+            android:layout="@layout/unbirday_import_row"
             android:selectable="true" />
 
         <com.minar.birday.preferences.backup.ContactsImporter

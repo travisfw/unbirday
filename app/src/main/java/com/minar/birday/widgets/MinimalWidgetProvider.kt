@@ -7,7 +7,7 @@ import android.content.Intent
 import com.minar.birday.R
 
 
-class MinimalWidgetProvider : BirdayWidgetProvider() {
+class MinimalWidgetProvider : UnbirdayWidgetProvider() {
 
     override var widgetLayout
         get() = R.layout.widget_minimal

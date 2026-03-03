@@ -21,6 +21,7 @@ import com.minar.birday.persistence.EventDao
 import com.minar.birday.persistence.EventDatabase
 import com.minar.birday.utilities.addInsetsByPadding
 import com.minar.birday.utilities.applyLoopingAnimatedVectorDrawable
+import com.minar.birday.utilities.eventToResult
 import com.minar.birday.utilities.formatEventList
 import com.minar.birday.utilities.getNextYears
 import com.minar.birday.utilities.maxNumberOfAdditionalNotificationDays
@@ -381,8 +382,8 @@ class MinimalWidgetConfigurationActivity : AppCompatActivity() {
 
             Thread {
                 // Get the next events and the proper formatter
-                val eventDao: EventDao = EventDatabase.getBirdayDatabase(this).eventDao()
-                val orderedEvents: List<EventResult> = eventDao.getOrderedEventsStatic()
+                val eventDao: EventDao = EventDatabase.getUnbirdayDatabase(this).eventDao()
+                val orderedEvents: List<EventResult> = eventDao.getAllEventsStatic().map { eventToResult(it) }.sortedBy { it.nextDate }
 
                 // Launch the app on click
                 intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)

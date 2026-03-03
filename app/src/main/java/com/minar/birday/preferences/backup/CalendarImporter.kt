@@ -150,9 +150,8 @@ class CalendarImporter(context: Context, attrs: AttributeSet?) : Preference(cont
                 Log.d("import", "Name is: $title")
                 Log.d("import", "Other data: $id, $description, $begin, $rule")
 
-                // Create a custom event if the event rule is "yearly"
-                if (rule != null && rule.contains("FREQ=YEARLY")) {
-                    // Don't consider any year, but the best approach would be to find the first occurrence of each event
+                // Import yearly recurring events and non-recurring events (unbirday exports)
+                if ((rule != null && rule.contains("FREQ=YEARLY")) || rule == null) {
                     val date = LocalDate.ofEpochDay(begin / (24 * 60 * 60 * 1000)).withYear(1970)
                     val importedEvent = ImportedEvent(
                         id.toString(),

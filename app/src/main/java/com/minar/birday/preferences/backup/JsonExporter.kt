@@ -36,7 +36,7 @@ class JsonExporter(context: Context, attrs: AttributeSet?) : Preference(context,
             act.showSnackbar(context.getString(R.string.no_events))
             return
         }
-        val fileName = "BirdayJson_${LocalDate.now()}.json"
+        val fileName = "UnbirdayJson_${LocalDate.now()}.json"
         act.saveJson.launch(fileName)
     }
 
@@ -47,12 +47,8 @@ class JsonExporter(context: Context, attrs: AttributeSet?) : Preference(context,
             uri: Uri?
         ): String {
             // Take the list of events
-            val eventDao = EventDatabase.getBirdayDatabase(context).eventDao()
-            val eventResults = eventDao.getOrderedEventsStatic()
-
-            // Transform the list in a list of simple events
-            val events = mutableListOf<Event>()
-            eventResults.forEach { events.add(resultToEvent(it)) }
+            val eventDao = EventDatabase.getUnbirdayDatabase(context).eventDao()
+            val events = eventDao.getAllEventsStatic()
 
             // Transform the entire list in a JSON string
             val builder = GsonBuilder().registerTypeAdapter(
@@ -80,7 +76,7 @@ class JsonExporter(context: Context, attrs: AttributeSet?) : Preference(context,
                 } else {
                     // Legacy: write to app files dir
                     val appDir = File(context.getExternalFilesDir(null)!!.absolutePath)
-                    val fileName = "BirdayJson_${LocalDate.now()}.json"
+                    val fileName = "UnbirdayJson_${LocalDate.now()}.json"
                     val dest = File(appDir, fileName)
                     dest.writeText(json, Charsets.UTF_8)
                     return dest.absolutePath

@@ -10,7 +10,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.minar.birday.model.Event
 
 
-@Database(entities = [Event::class], version = 11, exportSchema = false)
+@Database(entities = [Event::class], version = 13, exportSchema = false)
 @TypeConverters(LocalDateTypeConverter::class)
 abstract class EventDatabase : RoomDatabase() {
     abstract fun eventDao(): EventDao
@@ -38,7 +38,21 @@ abstract class EventDatabase : RoomDatabase() {
                 )
             }
         }
-        fun getBirdayDatabase(context: Context): EventDatabase {
+        // Migration strategy to add dayOfWeek column from version 11 to 12
+        private val MIGRATION_11_12: Migration = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE Event ADD COLUMN dayOfWeek INTEGER DEFAULT NULL"
+                )
+            }
+        }
+        // Migration strategy to remap Sunday from Java convention (7) to SQLite convention (0)
+        private val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("UPDATE Event SET dayOfWeek = 0 WHERE dayOfWeek = 7")
+            }
+        }
+        fun getUnbirdayDatabase(context: Context): EventDatabase {
             val tempInstance = INSTANCE
             if (tempInstance != null) {
                 return tempInstance
@@ -47,10 +61,12 @@ abstract class EventDatabase : RoomDatabase() {
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     EventDatabase::class.java,
-                    "BirdayDB"
+                    "UnbirdayDB"
                 )
                     .addMigrations(MIGRATION_9_10)
                     .addMigrations(MIGRATION_10_11)
+                    .addMigrations(MIGRATION_11_12)
+                    .addMigrations(MIGRATION_12_13)
                     .build()
                 INSTANCE = instance
                 return instance

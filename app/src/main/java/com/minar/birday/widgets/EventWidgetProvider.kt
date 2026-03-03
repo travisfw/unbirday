@@ -7,7 +7,7 @@ import android.content.Intent
 import com.minar.birday.R
 
 
-class EventWidgetProvider : BirdayWidgetProvider() {
+class EventWidgetProvider : UnbirdayWidgetProvider() {
 
     override var widgetLayout
         get() = R.layout.widget_upcoming

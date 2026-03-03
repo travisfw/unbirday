@@ -21,12 +21,13 @@ import com.minar.birday.persistence.EventDao
 import com.minar.birday.persistence.EventDatabase
 import com.minar.birday.receivers.NotificationActionReceiver
 import com.minar.birday.utilities.byteArrayToBitmap
+import com.minar.birday.utilities.eventToResult
 import com.minar.birday.utilities.formatDaysRemaining
 import com.minar.birday.utilities.formatEventList
 import com.minar.birday.utilities.getCircularBitmap
 import com.minar.birday.utilities.getRemainingDays
+import com.minar.birday.utilities.sqliteValue
 import java.time.LocalDate
-import java.time.temporal.ChronoUnit
 import java.util.Calendar
 import java.util.concurrent.TimeUnit
 
@@ -34,8 +35,7 @@ import java.util.concurrent.TimeUnit
 class EventWorker(context: Context, params: WorkerParameters) : Worker(context, params) {
     override fun doWork(): Result {
         val appContext = applicationContext
-        val eventDao: EventDao = EventDatabase.getBirdayDatabase(appContext).eventDao()
-        val allEvents: List<EventResult> = eventDao.getOrderedEventsStatic()
+        val eventDao: EventDao = EventDatabase.getUnbirdayDatabase(appContext).eventDao()
         val currentDate = Calendar.getInstance()
         val dueDate = Calendar.getInstance()
         val sharedPrefs = PreferenceManager.getDefaultSharedPreferences(applicationContext)
@@ -53,28 +53,21 @@ class EventWorker(context: Context, params: WorkerParameters) : Worker(context, 
 
         try {
             // Check for upcoming and actual birthdays and send notification
-            val anticipated = mutableListOf<EventResult>()
-            val actual = mutableListOf<EventResult>()
-            for (event in allEvents) {
-                // Fill the list of upcoming events
-                if (!additionalNotificationDays.isNullOrEmpty() &&
-                    additionalNotificationDays.any {
-                        it.toInt() == ChronoUnit.DAYS.between(LocalDate.now(), event.nextDate)
-                            .toInt()
-                    }
-                ) {
-                    // Favorite = null means that the event is ignored
-                    if (onlyFavoritesAdditional && event.favorite == false || event.favorite == null) continue
-                    anticipated.add(event)
-                }
+            val today = LocalDate.now()
 
-                // Fill the list of events happening today
-                if (event.nextDate!!.isEqual(LocalDate.now())) {
-                    // Favorite = null means that the event is ignored
-                    if (onlyFavoritesNotification && event.favorite == false || event.favorite == null) continue
-                    actual.add(event)
-                }
-            }
+            val actual = eventDao
+                .getEventsForUnbirday(today.dayOfWeek.sqliteValue, today.dayOfMonth)
+                .filter { it.favorite != null }
+                .let { if (onlyFavoritesNotification) it.filter { e -> e.favorite == true } else it }
+                .map { eventToResult(it) }
+
+            val anticipated = additionalNotificationDays.orEmpty().flatMap { offsetStr ->
+                val target = today.plusDays(offsetStr.toLong())
+                eventDao.getEventsForUnbirday(target.dayOfWeek.sqliteValue, target.dayOfMonth)
+                    .filter { it.favorite != null }
+                    .let { if (onlyFavoritesAdditional) it.filter { e -> e.favorite == true } else it }
+                    .map { eventToResult(it) }
+            }.sortedBy { it.nextDate }
             // Send a grouped notification, or a single notification for each event
             if (groupNotification) {
                 if (anticipated.isNotEmpty()) {

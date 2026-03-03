@@ -16,7 +16,7 @@ import java.io.FileOutputStream
 import java.io.InputStreamReader
 
 
-class BirdayImporter(context: Context, attrs: AttributeSet?) : Preference(context, attrs),
+class UnbirdayImporter(context: Context, attrs: AttributeSet?) : Preference(context, attrs),
     View.OnClickListener {
     private val act = context as MainActivity
 
@@ -40,7 +40,7 @@ class BirdayImporter(context: Context, attrs: AttributeSet?) : Preference(contex
         }
         EventDatabase.destroyInstance()
         val fileStream = context.contentResolver.openInputStream(fileUri)!!
-        val dbFile = context.getDatabasePath("BirdayDB").absoluteFile
+        val dbFile = context.getDatabasePath("UnbirdayDB").absoluteFile
         try {
             fileStream.copyTo(FileOutputStream(dbFile))
             (context as MainActivity).showSnackbar(context.getString(R.string.birday_import_success))
@@ -65,7 +65,7 @@ class BirdayImporter(context: Context, attrs: AttributeSet?) : Preference(contex
         val uri = fileUri.path ?: ""
 
         // An initial, naive validation
-        if (!(uri.contains("birdaybackup", true) ||
+        if (!(uri.contains("unbirdaybackup", true) ||
                     uri.contains("document", true))
         )
             return false

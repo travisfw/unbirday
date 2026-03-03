@@ -11,6 +11,7 @@ import com.minar.birday.activities.MainActivity
 import com.minar.birday.model.Event
 import com.minar.birday.model.EventCode
 import com.minar.birday.utilities.COLUMN_DATE
+import com.minar.birday.utilities.COLUMN_DAY_OF_WEEK
 import com.minar.birday.utilities.COLUMN_NAME
 import com.minar.birday.utilities.COLUMN_NOTES
 import com.minar.birday.utilities.COLUMN_SURNAME
@@ -91,6 +92,10 @@ class CsvImporter(context: Context, attrs: AttributeSet?) : Preference(context, 
                     else EventCode.BIRTHDAY.name
                     try {
                         // Depending on the detected columns, create the event objects
+                        val dayOfWeekStr = rowValues.getOrNull(
+                            columnsMapping.getOrDefault(COLUMN_DAY_OF_WEEK, -1)
+                        )?.trim()
+                        val dayOfWeekVal = dayOfWeekStr?.toIntOrNull()
                         val event = Event(
                             id = 0,
                             originalDate = LocalDate.parse(rowValues[columnsMapping[COLUMN_DATE]!!]),
@@ -113,7 +118,8 @@ class CsvImporter(context: Context, attrs: AttributeSet?) : Preference(context, 
                                     COLUMN_NOTES,
                                     -1
                                 )
-                            ) ?: ""
+                            ) ?: "",
+                            dayOfWeek = dayOfWeekVal
                         )
                         eventList.add(normalizeEvent(event))
                     } catch (e: Exception) {
@@ -169,6 +175,10 @@ class CsvImporter(context: Context, attrs: AttributeSet?) : Preference(context, 
             }
             if (column.contains("year") && rowMapping[COLUMN_YEAR_MATTER] == null) {
                 rowMapping[COLUMN_YEAR_MATTER] = rowValues.indexOf(it)
+                return@forEach
+            }
+            if (column.contains("dayofweek") && rowMapping[COLUMN_DAY_OF_WEEK] == null) {
+                rowMapping[COLUMN_DAY_OF_WEEK] = rowValues.indexOf(it)
                 return@forEach
             }
         }

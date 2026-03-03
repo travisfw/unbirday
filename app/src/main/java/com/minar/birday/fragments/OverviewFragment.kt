@@ -17,6 +17,7 @@ import com.minar.birday.activities.MainActivity
 import com.minar.birday.databinding.FragmentOverviewBinding
 import com.minar.birday.model.EventResult
 import com.minar.birday.utilities.formatEventList
+import com.minar.birday.utilities.getEffectiveDayOfWeek
 import com.minar.birday.viewmodels.MainViewModel
 import com.minar.tasticalendar.model.TastiCalendarEvent
 import com.minar.tasticalendar.model.TcSundayHighlight
@@ -80,13 +81,20 @@ class OverviewFragment : Fragment() {
         val tcYear = binding.overviewYearView
         // Surely not a good approach, but it does the job, more or less
 
-        val tcEvents: List<TastiCalendarEvent> =
-            events.map {
-                TastiCalendarEvent(
-                    it.originalDate,
-                    formatEventList(listOf(it), surnameFirst = false, act, showSurnames = false)
-                )
+        // For unbirday, generate all matching dates in the displayed year for each event
+        val tcEvents: List<TastiCalendarEvent> = events.flatMap { event ->
+            val dow = getEffectiveDayOfWeek(event)
+            val dom = event.originalDate.dayOfMonth
+            val label = formatEventList(listOf(event), surnameFirst = false, act, showSurnames = false)
+            // Find all dates in yearNumber where dayOfMonth=dom and dayOfWeek=dow
+            (1..12).mapNotNull { month ->
+                try {
+                    val candidate = LocalDate.of(yearNumber, month, dom)
+                    if (candidate.dayOfWeek == dow) TastiCalendarEvent(candidate, label)
+                    else null
+                } catch (_: Exception) { null } // handles invalid dates like Feb 30
             }
+        }
 
         // Snackbar related settings
         tcYear.apply {

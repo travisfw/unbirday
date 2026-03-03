@@ -20,15 +20,12 @@ import com.minar.birday.model.EventCode
 import com.minar.birday.model.EventDataItem
 import com.minar.birday.model.EventResult
 import com.minar.birday.utilities.formatName
-import com.minar.birday.utilities.getNextYears
-import com.minar.birday.utilities.getReducedDate
-import com.minar.birday.utilities.getYears
+import com.minar.birday.utilities.getReducedDateForEvent
 import com.minar.birday.utilities.setEventImageOrPlaceholder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import java.time.format.DateTimeFormatter
-import java.time.format.FormatStyle
+import java.time.LocalDate
 import java.time.format.TextStyle
 import java.util.Locale
 
@@ -183,21 +180,17 @@ class EventAdapter(
             val sharedPrefs = PreferenceManager.getDefaultSharedPreferences(context)
             val formattedPersonName =
                 formatName(event, sharedPrefs.getBoolean("surname_first", false))
-            // If the year isn't considered, show only the day and the month
-            val formatter: DateTimeFormatter = DateTimeFormatter.ofLocalizedDate(FormatStyle.LONG)
-            val originalDate =
-                if (event.yearMatter!!) "${event.originalDate.format(formatter)} - ${getYears(event)}▶${
-                    String.format(
-                        context.resources.getQuantityString(R.plurals.years, getNextYears(event)),
-                        getNextYears(event)
-                    )
-                }"
-                else getReducedDate(event.originalDate).replaceFirstChar {
-                    if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString()
-                }
-            // The original date row also has the current age
+            // Always show the unbirday pattern (e.g. "Wednesday the 5th")
+            val datePart = getReducedDateForEvent(event).replaceFirstChar {
+                if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString()
+            }
+            val daysUntil = event.nextDate!!.toEpochDay() - LocalDate.now().toEpochDay()
+            val dateText = if (daysUntil == 0L) datePart
+            else context.resources.getQuantityString(
+                R.plurals.days_until, daysUntil.toInt(), daysUntil.toInt()
+            ) + " " + datePart
             eventPerson.text = formattedPersonName
-            eventDate.text = originalDate
+            eventDate.text = dateText
 
             // Manage the image
             val hideImages = sharedPrefs.getBoolean("hide_images", false)

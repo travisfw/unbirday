@@ -35,14 +35,14 @@ import com.minar.birday.model.Event
 import com.minar.birday.model.EventCode
 import com.minar.birday.model.EventResult
 import com.minar.birday.persistence.ContactsRepository
-import com.minar.birday.utilities.StatsGenerator
 import com.minar.birday.utilities.addInsetsByPadding
 import com.minar.birday.utilities.byteArrayToBitmap
 import com.minar.birday.utilities.formatDaysRemaining
 import com.minar.birday.utilities.formatName
 import com.minar.birday.utilities.formatTextPreview
+import com.minar.birday.utilities.formatUnbirdayForEvent
 import com.minar.birday.utilities.getNextYears
-import com.minar.birday.utilities.getReducedDate
+import com.minar.birday.utilities.getReducedDateForEvent
 import com.minar.birday.utilities.getRemainingDays
 import com.minar.birday.utilities.getStringForTypeCodename
 import com.minar.birday.utilities.getThemeColor
@@ -104,7 +104,6 @@ class DetailsFragment : Fragment() {
         val fullView = binding.detailsMotionLayout
         val shimmer = binding.detailsCountdownShimmer
         val shimmerEnabled = sharedPrefs.getBoolean("shimmer", false)
-        val astrologyDisabled = sharedPrefs.getBoolean("disable_astrology", false)
         val hideImage = sharedPrefs.getBoolean("hide_images", false)
         val surnameFirst = sharedPrefs.getBoolean("surname_first", false)
         val titleText = formatName(event, surnameFirst)
@@ -296,109 +295,27 @@ class DetailsFragment : Fragment() {
 
         val formatter: DateTimeFormatter =
             DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL)
-        val subject: MutableList<EventResult> = mutableListOf()
-        subject.add(event)
-        val statsGenerator = StatsGenerator(subject, context)
         val daysRemaining = getRemainingDays(event.nextDate!!)
         val nextDateFormatted = event.nextDate.format(formatter)
-        // Days remaining, plus next date properly formatted
+        val unbirdayLabel = formatUnbirdayForEvent(event)
+        // Days remaining, plus next date and unbirday pattern
         val daysCountdown =
-            formatDaysRemaining(daysRemaining, requireContext()) + "\n" + nextDateFormatted
-        binding.detailsZodiacSignValue.text =
-            statsGenerator.getZodiacSign(event)
+            formatDaysRemaining(daysRemaining, requireContext()) + "\n" + nextDateFormatted + "\n" + unbirdayLabel
         binding.detailsCountdown.text = daysCountdown
 
         // Manage the different event types
         if (event.type == (EventCode.BIRTHDAY.name)) {
-            // Hide the age and the chinese sign and use a shorter birth date if the year is unknown
+            // Hide the age and use a shorter birth date if the year is unknown
             if (!event.yearMatter!!) {
                 binding.detailsNextAge.visibility = View.GONE
                 binding.detailsNextAgeValue.visibility = View.GONE
-                binding.detailsChineseSign.visibility = View.GONE
-                binding.detailsChineseSignValue.visibility = View.GONE
-                val reducedBirthDate = getReducedDate(event.originalDate)
+                val reducedBirthDate = getReducedDateForEvent(event)
                 binding.detailsBirthDateValue.text = reducedBirthDate
             } else {
                 binding.detailsNextAgeValue.text = getNextYears(event).toString()
+                // Show the original date + the unbirday pattern
                 binding.detailsBirthDateValue.text =
-                    event.originalDate.format(formatter)
-                binding.detailsChineseSignValue.text =
-                    statsGenerator.getChineseSign(event)
-            }
-            // Set the drawable of the zodiac sign or disable them entirely
-            if (astrologyDisabled) disableAstrology()
-            else when (statsGenerator.getZodiacSignNumber(event)) {
-                0 -> binding.detailsClearBackground.setImageDrawable(
-                    ContextCompat.getDrawable(
-                        requireContext(), R.drawable.ic_zodiac_sagittarius
-                    )
-                )
-
-                1 -> binding.detailsClearBackground.setImageDrawable(
-                    ContextCompat.getDrawable(
-                        requireContext(), R.drawable.ic_zodiac_capricorn
-                    )
-                )
-
-                2 -> binding.detailsClearBackground.setImageDrawable(
-                    ContextCompat.getDrawable(
-                        requireContext(), R.drawable.ic_zodiac_aquarius
-                    )
-                )
-
-                3 -> binding.detailsClearBackground.setImageDrawable(
-                    ContextCompat.getDrawable(
-                        requireContext(), R.drawable.ic_zodiac_pisces
-                    )
-                )
-
-                4 -> binding.detailsClearBackground.setImageDrawable(
-                    ContextCompat.getDrawable(
-                        requireContext(), R.drawable.ic_zodiac_aries
-                    )
-                )
-
-                5 -> binding.detailsClearBackground.setImageDrawable(
-                    ContextCompat.getDrawable(
-                        requireContext(), R.drawable.ic_zodiac_taurus
-                    )
-                )
-
-                6 -> binding.detailsClearBackground.setImageDrawable(
-                    ContextCompat.getDrawable(
-                        requireContext(), R.drawable.ic_zodiac_gemini
-                    )
-                )
-
-                7 -> binding.detailsClearBackground.setImageDrawable(
-                    ContextCompat.getDrawable(
-                        requireContext(), R.drawable.ic_zodiac_cancer
-                    )
-                )
-
-                8 -> binding.detailsClearBackground.setImageDrawable(
-                    ContextCompat.getDrawable(
-                        requireContext(), R.drawable.ic_zodiac_leo
-                    )
-                )
-
-                9 -> binding.detailsClearBackground.setImageDrawable(
-                    ContextCompat.getDrawable(
-                        requireContext(), R.drawable.ic_zodiac_virgo
-                    )
-                )
-
-                10 -> binding.detailsClearBackground.setImageDrawable(
-                    ContextCompat.getDrawable(
-                        requireContext(), R.drawable.ic_zodiac_libra
-                    )
-                )
-
-                11 -> binding.detailsClearBackground.setImageDrawable(
-                    ContextCompat.getDrawable(
-                        requireContext(), R.drawable.ic_zodiac_scorpio
-                    )
-                )
+                    event.originalDate.format(formatter) + "\n" + formatUnbirdayForEvent(event)
             }
         } else {
             // Not a birthday, set the drawable of the event type
@@ -449,7 +366,6 @@ class DetailsFragment : Fragment() {
                 getStringForTypeCodename(requireContext(), event.type!!)
             binding.detailsBirthDate.visibility = View.GONE
             binding.detailsNextAge.visibility = View.GONE
-            disableAstrology()
         }
 
         // Manage the predictive back between fragments
@@ -535,11 +451,4 @@ class DetailsFragment : Fragment() {
             .startChooser()
     }
 
-    // Disable any astrology related view
-    private fun disableAstrology() {
-        binding.detailsZodiacSign.visibility = View.GONE
-        binding.detailsZodiacSignValue.visibility = View.GONE
-        binding.detailsChineseSign.visibility = View.GONE
-        binding.detailsChineseSignValue.visibility = View.GONE
-    }
 }

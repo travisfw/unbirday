@@ -43,7 +43,7 @@ class AddDemoEntriesPreference(context: Context, attrs: AttributeSet?) :
                     val csvImporter = CsvImporter(act, null)
                     csvImporter.importEventsCsv(
                         act,
-                        getResourceUri(R.raw.birday_demo_entries)
+                        getResourceUri(R.raw.unbirday_demo_entries)
                     )
                 }.invokeOnCompletion {
                     act.showSnackbar(

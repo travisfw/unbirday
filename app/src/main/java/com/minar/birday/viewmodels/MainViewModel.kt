@@ -1,8 +1,6 @@
 package com.minar.birday.viewmodels
 
 import android.app.Application
-import android.content.Context
-import android.text.SpannableStringBuilder
 import androidx.lifecycle.*
 import androidx.preference.PreferenceManager
 import androidx.work.OneTimeWorkRequestBuilder
@@ -11,7 +9,7 @@ import com.minar.birday.model.Event
 import com.minar.birday.model.EventResult
 import com.minar.birday.persistence.EventDao
 import com.minar.birday.persistence.EventDatabase
-import com.minar.birday.utilities.StatsGenerator
+import com.minar.birday.utilities.eventToResult
 import com.minar.birday.workers.EventWorker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -27,8 +25,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val searchString = MutableLiveData<String>()
     val selectedType = MutableLiveData<String>()
     private val searchValues = MediatorLiveData<Pair<String?, String?>>()
-    var fullStats = MutableLiveData<SpannableStringBuilder>()
-    private val eventDao: EventDao = EventDatabase.getBirdayDatabase(application).eventDao()
+    private val eventDao: EventDao = EventDatabase.getUnbirdayDatabase(application).eventDao()
     var confettiDone: Boolean = false
 
     init {
@@ -40,17 +37,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             addSource(selectedType) { value = searchString.value to it }
         }
 
-        // All the events, unfiltered
-        allEventsUnfiltered = eventDao.getOrderedEvents()
+        // All the events, unfiltered — compute nextDate in Kotlin and sort
+        allEventsUnfiltered = eventDao.getAllEvents().map { events ->
+            events.map { eventToResult(it) }.sortedBy { it.nextDate }
+        }
         // All the events, filtered by search string and type
         allEvents = searchValues.switchMap { pair ->
-            val searchString = pair.first
-            val selectedType = pair.second
-            if (!searchString.isNullOrBlank())
-                eventDao.getOrderedEventsByName(searchString)
-            else if (!selectedType.isNullOrBlank())
-                eventDao.getOrderedEventsByType(selectedType)
-            else eventDao.getOrderedEventsByName("")
+            val search = pair.first
+            val type = pair.second
+            val source = if (!search.isNullOrBlank())
+                eventDao.getEventsByName(search)
+            else if (!type.isNullOrBlank())
+                eventDao.getEventsByType(type)
+            else eventDao.getEventsByName("")
+            source.map { events ->
+                events.map { eventToResult(it) }.sortedBy { it.nextDate }
+            }
         }
         eventsCount = eventDao.getEventsCount()
         scheduleNextCheck()
@@ -58,15 +60,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // Launching new coroutines to insert the data in a non-blocking way
 
-    fun getStats(events: List<EventResult>, context: Context) =
-        viewModelScope.launch(Dispatchers.IO) {
-            val astrologyDisabled = sharedPrefs.getBoolean("disable_astrology", false)
-            val generator = StatsGenerator(events, context, astrologyDisabled)
-            fullStats.postValue(generator.generateFullStats())
-        }
-
     fun getFavorites(): LiveData<List<EventResult>> =
-        eventDao.getOrderedFavoriteEvents()
+        eventDao.getFavoriteEvents().map { events ->
+            events.map { eventToResult(it) }.sortedBy { it.nextDate }
+        }
 
     fun insert(event: Event) = viewModelScope.launch(Dispatchers.IO) {
         val replaceOnConflict = sharedPrefs.getBoolean("replace_on_conflict", true)

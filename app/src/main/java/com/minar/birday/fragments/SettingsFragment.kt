@@ -100,7 +100,6 @@ class SettingsFragment : PreferenceFragmentCompat(), OnSharedPreferenceChangeLis
             "surname_first" -> updateWidgets(updateUpcoming = true, updateMinimal = true)
             "hide_images" -> updateWidgets(updateUpcoming = true)
             "multi_additional_notification" -> updateWidgets(updateMinimal = true)
-            "disable_astrology" -> (requireActivity() as MainActivity).forceRefreshStats()
         }
     }
 

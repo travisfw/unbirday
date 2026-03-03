@@ -6,6 +6,7 @@ import com.minar.birday.model.Event
 import com.minar.birday.model.EventCode
 import com.minar.birday.model.EventResult
 import com.minar.birday.model.EventType
+import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.Period
 import java.time.format.DateTimeFormatter
@@ -13,6 +14,11 @@ import java.time.format.FormatStyle
 import java.time.format.TextStyle
 import java.time.temporal.ChronoUnit
 import java.util.Locale
+
+// Adapt between Java DayOfWeek (1=Mon…7=Sun) and SQLite strftime('%w') (0=Sun…6=Sat).
+// The only value that differs is Sunday: Java=7, SQLite=0. Mon–Sat are 1–6 in both.
+fun Int.toDayOfWeek(): DayOfWeek = DayOfWeek.of(if (this == 0) 7 else this)
+val DayOfWeek.sqliteValue: Int get() = value % 7   // Sun(7)→0, Mon(1)→1 … Sat(6)→6
 
 // Event related constants
 const val START_YEAR = 0
@@ -22,6 +28,7 @@ const val COLUMN_SURNAME = "surname"
 const val COLUMN_DATE = "date"
 const val COLUMN_YEAR_MATTER = "yearMatter"
 const val COLUMN_NOTES = "notes"
+const val COLUMN_DAY_OF_WEEK = "dayOfWeek"
 
 // Transform an event result in a simple event
 fun resultToEvent(eventResult: EventResult) = Event(
@@ -33,6 +40,7 @@ fun resultToEvent(eventResult: EventResult) = Event(
     originalDate = eventResult.originalDate,
     yearMatter = eventResult.yearMatter,
     notes = eventResult.notes,
+    dayOfWeek = eventResult.dayOfWeek,
     image = eventResult.image
 )
 
@@ -44,18 +52,76 @@ fun eventToResult(event: Event) = EventResult(
     surname = event.surname,
     favorite = event.favorite,
     originalDate = event.originalDate,
-    nextDate = getNextDate(event.originalDate),
+    nextDate = getNextDateForEvent(event),
     yearMatter = event.yearMatter,
     notes = event.notes,
+    dayOfWeek = event.dayOfWeek,
     image = event.image
 )
 
-// Simply returns the next date for a given date
+// Get the effective day-of-week for an event, using stored dayOfWeek if available
+fun getEffectiveDayOfWeek(event: Event): DayOfWeek =
+    if (event.dayOfWeek != null) event.dayOfWeek.toDayOfWeek()
+    else event.originalDate.dayOfWeek
+
+// Get the effective day-of-week for an event result
+fun getEffectiveDayOfWeek(event: EventResult): DayOfWeek =
+    if (event.dayOfWeek != null) event.dayOfWeek.toDayOfWeek()
+    else event.originalDate.dayOfWeek
+
+// Compute the next "unbirday" — the next date where dayOfWeek AND dayOfMonth both match
+fun getNextUnbirday(dayOfWeek: DayOfWeek, dayOfMonth: Int): LocalDate {
+    val today = LocalDate.now()
+    // Search up to 730 days ahead (worst case for combos like "Friday the 31st")
+    for (i in 0L..730L) {
+        val candidate = today.plusDays(i)
+        if (candidate.dayOfMonth == dayOfMonth && candidate.dayOfWeek == dayOfWeek) {
+            return candidate
+        }
+    }
+    // Fallback (should never reach for valid dayOfMonth 1-28)
+    return today
+}
+
+// Returns the next unbirday date for a given date (derives dayOfWeek from date)
 fun getNextDate(date: LocalDate): LocalDate {
-    val now = LocalDate.now()
-    val nextDate = date.withYear(now.year)
-    if (nextDate.isBefore(now)) nextDate.plusYears(1)
-    return nextDate
+    return getNextUnbirday(date.dayOfWeek, date.dayOfMonth)
+}
+
+// Returns the next unbirday date for an event, handling the stored dayOfWeek
+fun getNextDateForEvent(event: Event): LocalDate {
+    val dow = getEffectiveDayOfWeek(event)
+    return getNextUnbirday(dow, event.originalDate.dayOfMonth)
+}
+
+// Format an ordinal number: 1st, 2nd, 3rd, 4th, ..., 13th, 21st, etc.
+fun formatOrdinal(n: Int): String {
+    if (n in 11..13) return "${n}th"
+    return when (n % 10) {
+        1 -> "${n}st"
+        2 -> "${n}nd"
+        3 -> "${n}rd"
+        else -> "${n}th"
+    }
+}
+
+// Format as "Wednesday the 5th"
+fun formatUnbirday(dayOfWeek: DayOfWeek, dayOfMonth: Int): String {
+    val dowName = dayOfWeek.getDisplayName(TextStyle.FULL, Locale.getDefault())
+    return "$dowName the ${formatOrdinal(dayOfMonth)}"
+}
+
+// Format unbirday for an event result
+fun formatUnbirdayForEvent(event: EventResult): String {
+    val dow = getEffectiveDayOfWeek(event)
+    return formatUnbirday(dow, event.originalDate.dayOfMonth)
+}
+
+// Format a date as "Monday the 30th, 2026/March"
+fun formatNextDateFull(date: LocalDate): String {
+    val unbirday = formatUnbirday(date.dayOfWeek, date.dayOfMonth)
+    val monthName = date.month.getDisplayName(TextStyle.FULL, Locale.getDefault())
+    return "$unbirday, ${date.year}/$monthName"
 }
 
 // Destroy any illegal character and length in the fields, add missing fields if possible
@@ -74,6 +140,7 @@ fun normalizeEvent(event: Event): Event {
         notes = event.notes?.substring(IntRange(0, 500.coerceAtMost(event.notes.length) - 1)),
         originalDate = event.originalDate,
         yearMatter = event.yearMatter,
+        dayOfWeek = event.dayOfWeek,
         type = fixedType
     )
 }
@@ -105,9 +172,19 @@ fun isUnknownType(type: String?): Boolean {
 }
 
 // Properly format the next date for widget and next event card
-fun nextDateFormatted(event: EventResult, formatter: DateTimeFormatter, context: Context): String {
+// e.g. "28 days until Monday the 30th, in 2026/March."
+fun nextDateFormatted(event: EventResult, @Suppress("UNUSED_PARAMETER") formatter: DateTimeFormatter, context: Context): String {
     val daysRemaining = getRemainingDays(event.nextDate!!)
-    return event.nextDate.format(formatter) + ". " + formatDaysRemaining(daysRemaining, context)
+    val unbirday = formatUnbirday(event.nextDate.dayOfWeek, event.nextDate.dayOfMonth)
+    val year = event.nextDate.year
+    val monthName = event.nextDate.month.getDisplayName(TextStyle.FULL, Locale.getDefault())
+    val daysText = when (daysRemaining) {
+        -1 -> context.getString(R.string.yesterday)
+        0 -> context.getString(R.string.today)
+        1 -> context.getString(R.string.tomorrow)
+        else -> context.resources.getQuantityString(R.plurals.days_until, daysRemaining, daysRemaining)
+    }
+    return "$daysText $unbirday, in $year/$monthName."
 }
 
 // Return the remaining days, properly formatted, including "yesterday" case
@@ -124,7 +201,7 @@ fun formatDaysRemaining(daysRemaining: Int, context: Context): String {
         0 -> context.getString(R.string.today)
         1 -> context.getString(R.string.tomorrow)
         else -> context.resources.getQuantityString(
-            R.plurals.days_left,
+            R.plurals.days_until,
             daysRemaining,
             daysRemaining
         )
@@ -205,10 +282,13 @@ fun formatName(event: EventResult, surnameFirst: Boolean): String {
     }
 }
 
-// Get the reduced date for an event, i.e. the month and day date, unsupported natively
+// Get the reduced date for an event in unbirday format: "Wednesday the 5th"
 fun getReducedDate(date: LocalDate) =
-    date.month.getDisplayName(TextStyle.FULL, Locale.getDefault()) +
-            ", " + date.dayOfMonth.toString()
+    formatUnbirday(date.dayOfWeek, date.dayOfMonth)
+
+// Get the reduced date for an event result, using stored dayOfWeek if available
+fun getReducedDateForEvent(event: EventResult) =
+    formatUnbirdayForEvent(event)
 
 // Get the years also considering the possible corner cases
 fun getYears(eventResult: EventResult): Int {
@@ -297,6 +377,7 @@ fun formatTextPreview(
         EventCode.NAME_DAY.name -> typeEmoji = String(Character.toChars(0x1F607))
         EventCode.OTHER.name -> typeEmoji = String(Character.toChars(0x1F7E2))
     }
+    val unbirdayLabel = formatUnbirdayForEvent(event)
     val eventInformation =
         if (multiline)
             String(Character.toChars(0x1F388)) + "  " +
@@ -306,9 +387,11 @@ fun formatTextPreview(
                     " (" + getStringForTypeCodename(context, event.type!!) +
                     ")\n" + String(Character.toChars(0x1F56F)) + "  " +
                     event.nextDate!!.format(formatter) +
-                    // Add a fourth line with the original date, if the year matters
+                    "\n" + String(Character.toChars(0x1F4C5)) + "  " +
+                    unbirdayLabel +
+                    // Add a line with the original date, if the year matters
                     if (event.yearMatter!!)
-                        "\n" + String(Character.toChars(0x1F4C5)) + "  " +
+                        "\n" + String(Character.toChars(0x1F382)) + "  " +
                                 event.originalDate.format(formatter)
                     else ""
         else "$typeEmoji ${
@@ -316,6 +399,6 @@ fun formatTextPreview(
                 event,
                 surnameFirst
             )
-        }\n${event.originalDate.format(formatter)}"
+        }\n$unbirdayLabel"
     return eventInformation
 }

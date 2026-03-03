@@ -242,6 +242,78 @@
                 app:switchPadding="@dimen/text_switch_padding"
                 app:switchTextAppearance="@style/TextAppearance.Material3.BodyLarge" />
 
+            <!-- Day of week picker (visible when yearMatter=false) -->
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/dayOfWeekLayout"
+                style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox.Dense.ExposedDropdownMenu"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="@dimen/activity_horizontal_margin"
+                android:layout_marginTop="@dimen/form_vertical_margin"
+                android:hint="@string/day_of_week_label"
+                android:visibility="gone"
+                app:boxBackgroundColor="@color/transparent"
+                app:boxCornerRadiusBottomEnd="@dimen/text_field_corner"
+                app:boxCornerRadiusBottomStart="@dimen/text_field_corner"
+                app:boxCornerRadiusTopEnd="@dimen/text_field_corner"
+                app:boxCornerRadiusTopStart="@dimen/text_field_corner"
+                app:hintAnimationEnabled="true"
+                app:hintTextColor="?attr/colorPrimary"
+                app:layout_constraintEnd_toStartOf="@id/dayOfMonthLayout"
+                app:layout_constraintHorizontal_weight="3"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toBottomOf="@id/countYearSwitch">
+
+                <AutoCompleteTextView
+                    android:id="@+id/dayOfWeekEvent"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="none"
+                    android:padding="0dp"
+                    android:textCursorDrawable="@drawable/custom_cursor" />
+
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <!-- Day of month picker (visible when yearMatter=false) -->
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/dayOfMonthLayout"
+                style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox.Dense.ExposedDropdownMenu"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="@dimen/activity_horizontal_margin"
+                android:layout_marginTop="@dimen/form_vertical_margin"
+                android:hint="@string/day_of_month_label"
+                android:visibility="gone"
+                app:boxBackgroundColor="@color/transparent"
+                app:boxCornerRadiusBottomEnd="@dimen/text_field_corner"
+                app:boxCornerRadiusBottomStart="@dimen/text_field_corner"
+                app:boxCornerRadiusTopEnd="@dimen/text_field_corner"
+                app:boxCornerRadiusTopStart="@dimen/text_field_corner"
+                app:hintAnimationEnabled="true"
+                app:hintTextColor="?attr/colorPrimary"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintHorizontal_weight="2"
+                app:layout_constraintStart_toEndOf="@id/dayOfWeekLayout"
+                app:layout_constraintTop_toBottomOf="@id/countYearSwitch">
+
+                <AutoCompleteTextView
+                    android:id="@+id/dayOfMonthEvent"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="none"
+                    android:padding="0dp"
+                    android:textCursorDrawable="@drawable/custom_cursor" />
+
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <!-- Barrier to ensure buttons stay below all date input fields -->
+            <androidx.constraintlayout.widget.Barrier
+                android:id="@+id/dateInputBarrier"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                app:barrierDirection="bottom"
+                app:constraint_referenced_ids="countYearSwitch,dayOfWeekLayout,dayOfMonthLayout" />
+
             <Button
                 android:id="@+id/positiveButton"
                 style="@style/Widget.Material3Expressive.Button.TextButton"
@@ -251,7 +323,7 @@
                 android:text="@string/insert_event"
                 app:layout_constraintBottom_toBottomOf="parent"
                 app:layout_constraintEnd_toEndOf="parent"
-                app:layout_constraintTop_toBottomOf="@id/countYearSwitch" />
+                app:layout_constraintTop_toBottomOf="@id/dateInputBarrier" />
 
             <Button
                 android:id="@+id/negativeButton"

@@ -47,7 +47,7 @@ class ImportContactsWorker(appContext: Context, params: WorkerParameters) :
 
             if (events.isNotEmpty()) {
                 withContext(Dispatchers.IO) {
-                    val db = EventDatabase.getBirdayDatabase(applicationContext)
+                    val db = EventDatabase.getUnbirdayDatabase(applicationContext)
                     val dao = db.eventDao()
                     val replaceOnConflict = prefs.getBoolean("replace_on_conflict", true)
                     if (replaceOnConflict) dao.insertAllEventReplace(events) else dao.insertAllEventIgnore(

@@ -13,6 +13,7 @@ data class EventResult (
     var originalDate: LocalDate,
     val nextDate: LocalDate? = null,
     var notes: String? = "",
+    val dayOfWeek: Int? = null, // SQLite strftime('%w') convention: 0=SUNDAY..6=SATURDAY, only set when yearMatter=false
     val image: ByteArray? = null,
 ): Serializable {
     override fun equals(other: Any?): Boolean {
@@ -27,6 +28,7 @@ data class EventResult (
         if (surname != other.surname) return false
         if (yearMatter != other.yearMatter) return false
         if (originalDate != other.originalDate) return false
+        if (dayOfWeek != other.dayOfWeek) return false
         if (!image.contentEquals(other.image)) return false
 
         return true
@@ -42,6 +44,7 @@ data class EventResult (
         result = 31 * result + originalDate.hashCode()
         result = 31 * result + (nextDate?.hashCode() ?: 0)
         result = 31 * result + (notes?.hashCode() ?: 0)
+        result = 31 * result + (dayOfWeek?.hashCode() ?: 0)
         result = 31 * result + (image?.contentHashCode() ?: 0)
         return result
     }
